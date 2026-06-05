@@ -46,7 +46,6 @@ from narrativeloom.service.llm_client import (
     refine_segment,
     review_beat_consistency,
     review_merged_text,
-    _worldview_label,
 )
 from narrativeloom.service.llm_unified import cfg_from_preset, default_api_key_from_env, default_preset_from_env, verify_connection
 from narrativeloom.domain.personas import (
@@ -927,6 +926,7 @@ def _run_auto_expand_all(llm_cfg: Dict[str, Any], lg: str, n: int) -> None:
             canon_sheet=full_canon,
             rag_excerpt=rag_full,
             lang=lg,
+            num_sections=n,
         )
     except Exception as e:  # noqa: BLE001
         msg = str(e)
@@ -1664,13 +1664,6 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         _kickoff_beat_generation(idx, "function")
 
                     plan_labels = _fn_plan_labels(lg, idx)
-                    locked_wv = st.session_state.get("fn_locked_worldview")
-                    if locked_wv and idx > 0:
-                        st.caption(
-                            T("fn_locked_worldview_hint", lg).format(
-                                label=_worldview_label(locked_wv, lg)
-                            )
-                        )
                     plan_i = render_unified_plan_carousel(
                         lg,
                         idx,
@@ -1781,6 +1774,7 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         canon_sheet=full_canon,
                         rag_excerpt=rag_full,
                         lang=lg,
+                        num_sections=n,
                     )
                     st.session_state.expanded_prose = prose_out
                     if new_title:
