@@ -41,7 +41,7 @@ from narrativeloom.domain.personas import (
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-TYPIFIED_KEY_EVENTS_COUNT = 5
+TYPIFIED_KEY_EVENTS_COUNT = 3
 PROSE_CHARS_PER_SECTION_MIN = 600
 PROSE_CHARS_PER_SECTION_MAX = 800
 
