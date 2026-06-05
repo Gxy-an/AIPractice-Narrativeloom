@@ -62,6 +62,7 @@ from narrativeloom.domain.personas import (
 )
 from narrativeloom.service.story_rag import build_chunks_from_beats, canon_sheet_from_beats, retrieve_context
 from narrativeloom.config.access_gate import render_access_gate
+from narrativeloom.config.consent_gate import render_consent_gate
 from narrativeloom.front.ui_components import (
     inject_css,
     page_heading,
@@ -168,6 +169,7 @@ def _reset_new_story() -> None:
 def _init_state() -> None:
     defaults: Dict[str, Any] = {
         "app_access_granted": False,
+        "informed_consent_accepted": False,
         "logged_in": False,
         "ui_lang": "zh",
         "llm_cfg": None,
@@ -1908,6 +1910,7 @@ def main() -> None:
     )
     _init_state()
     render_access_gate()
+    render_consent_gate()
 
     if not st.session_state.logged_in:
         _landing()
