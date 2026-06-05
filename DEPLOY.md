@@ -25,9 +25,12 @@ MIMO_API_KEY = "你的密钥"
 OPENAI_API_KEY = "你的密钥"
 OPENAI_BASE_URL = "https://api.xiaomimimo.com/v1"
 LLM_MODEL = "mimo-v2-flash"
+
+# 网页访问密码（可选；删除或留空则不启用）
+APP_ACCESS_PASSWORD = "你自定义的访问密码"
 ```
 
-也可参考仓库内 `.streamlit/secrets.toml.example`。`app.py` 启动时会通过 `narrativeloom/config/env_bootstrap.py` 将 Secrets 注入环境变量。
+也可参考仓库内 `.streamlit/secrets.toml.example`。`app.py` 启动时会通过 `narrativeloom/config/env_bootstrap.py` 将 Secrets 注入环境变量。设置 `APP_ACCESS_PASSWORD` 后，访客需先输入该密码才能进入应用（与首页 LLM API Key 登录是两道独立校验）。
 
 ### 4. 部署
 

@@ -59,9 +59,22 @@ def get_global_css(mode: PageMode = "landing") -> str:
     --nl-shadow: {t['shadow_card']};
 }}
 
-html, body, [class*="css"] {{
+html, body {{
     font-family: var(--nl-sans) !important;
     color: var(--nl-body);
+}}
+.stApp label, .stMarkdown, .stApp p, .stApp h1, .stApp h2, .stApp h3,
+section.main input, section.main textarea, section.main button,
+[data-testid="stSidebar"] .stMarkdown {{
+    font-family: var(--nl-sans);
+}}
+/* Streamlit expander 等控件使用 Material Symbols，勿被全局 sans 覆盖 */
+span[data-testid="stIconMaterial"],
+.material-symbols-rounded,
+.material-icons {{
+    font-family: "Material Symbols Rounded", "Material Icons" !important;
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24 !important;
+    font-feature-settings: "liga" !important;
 }}
 .stApp {{
     background: {page_bg} !important;

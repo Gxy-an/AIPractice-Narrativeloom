@@ -13,6 +13,7 @@ _SECRET_KEYS = (
     "OPENAI_BASE_URL",
     "LLM_MODEL",
     "DEEPSEEK_API_KEY",
+    "APP_ACCESS_PASSWORD",
 )
 
 
