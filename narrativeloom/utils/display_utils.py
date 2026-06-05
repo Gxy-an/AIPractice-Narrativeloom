@@ -90,6 +90,30 @@ def key_events_meaningful(val: Any) -> bool:
     return True
 
 
+def typified_characters_meaningful(val: Any) -> bool:
+    """类型化小节人物字段是否含至少两名具名角色。"""
+    raw = coerce_display_text(val).strip()
+    if not raw or raw in _KEY_EVENTS_TRIVIAL:
+        return False
+    if "待补全" in raw:
+        return False
+    entries = [
+        e
+        for e in _split_character_entries(raw)
+        if e and e not in _KEY_EVENTS_TRIVIAL and len(e) > 2
+    ]
+    named = 0
+    for e in entries:
+        line = e.lstrip("-·• ").strip()
+        if "：" in line or ":" in line:
+            name = line.replace(":", "：").split("：", 1)[0].strip()
+            if name and len(name) >= 2:
+                named += 1
+        elif len(line) >= 2:
+            named += 1
+    return named >= 2
+
+
 def key_events_to_bullets(text: Any) -> str:
     """将核心事件整理为多行，每行以「· 」开头（Markdown 下行尾两空格换行，便于阅读）。"""
     raw = coerce_display_text(text)
@@ -221,47 +245,65 @@ def _split_event_entries(events: str, max_items: int = 5) -> List[str]:
     return out[:max_items]
 
 
-def _brief_char_phrase(desc: str, *, max_len: int = 12) -> str:
-    """卡片展示用：仅保留一个短语身份，不加省略号。"""
-    d = re.sub(r"\s+", " ", (desc or "").strip())
-    if not d:
-        return ""
-    d = re.split(r"[，,；;。]|(?:动机|驱动|本节)", d)[0].strip()
-    d = re.sub(r"^(?:是|为|担任|身为|作为|来自|生于|籍的|本土|现任|一位|一名|一个)", "", d).strip()
-    if len(d) > max_len:
-        d = d[:max_len]
-    return d
+_SCULPTOR_STATUS_CUT = re.compile(
+    r"[,，]?\s*(?:本节状态|当前状态|本节中|本节里|"
+    r"当前因|当前为|当前正|当前被|当前尝试|当前发现|当前识别|当前处于|当前潜伏).*$",
+    re.I,
+)
 
 
-def _brief_char_display(entry: str, *, max_desc: int = 12) -> str:
-    """卡片展示：姓名 + 一个短语身份（不加 …）。"""
-    s = (entry or "").strip()
+def sanitize_sculptor_description(desc: str, *, max_chars: int = 40) -> str:
+    """功能化人物行：去掉标签式用语，精简为短句直接叙述。"""
+    s = (desc or "").strip()
+    if not s:
+        return s
+    s = _SCULPTOR_STATUS_CUT.sub("", s).strip()
+    s = re.sub(r"(?:动机是|关系是|性格是|身份是|状态是)\s*", "", s)
+    s = re.sub(r"[,，]{2,}", "，", s)
+    s = re.sub(r"\s+", " ", s).strip("，,、 ")
+    if len(s) > max_chars:
+        for sep in ("，", ",", "；", ";"):
+            if sep in s:
+                head = s.split(sep, 1)[0].strip()
+                if len(head) >= 8:
+                    s = head
+                    break
+        if len(s) > max_chars:
+            s = s[:max_chars]
+    return s
+
+
+def _is_continuity_section_title(title: str) -> bool:
+    t = (title or "").strip()
+    return "连贯性校验" in t or "Continuity Checker" in t or t in ("【连贯性校验师】", "【Continuity Checker】")
+
+
+def _card_char_display(entry: str, *, max_chars: int = 88) -> str:
+    """卡片展示：与编辑区一致，保留完整人物行（仅做空白与 bullet 规整）。"""
+    s = (entry or "").strip().lstrip("-·• ").strip()
     if not s:
         return ""
-    if "：" not in s and ":" not in s:
-        return s[:max_desc] if len(s) > max_desc else s
-    s = s.replace(":", "：")
-    name, _, desc = s.partition("：")
-    name = name.strip().lstrip("-·• ")
-    phrase = _brief_char_phrase(desc, max_len=max_desc)
-    return f"{name}：{phrase}" if name and phrase else (name or phrase)
+    if len(s) > max_chars:
+        return s[:max_chars]
+    return s
 
 
 def format_typified_brief(data: dict, lang: str = "zh") -> Tuple[str, str, str]:
-    """时间地点一行；人物仅「姓名：身份」简短介绍；核心事件为 · 列表。"""
+    """时间地点一行；人物与编辑区一致（完整身份描述）；核心事件为 · 列表。"""
     setting = coerce_display_text(data.get("setting", ""))
     characters = coerce_display_text(data.get("characters", ""))
     events = coerce_display_text(data.get("key_events", ""))
     zh = (lang or "zh") == "zh"
     dash = "—" if zh else "—"
-    max_desc = 12 if zh else 16
+    max_char = 88 if zh else 120
 
     place_line = _strip_paren_notes(setting.replace("\n", " ")).strip() or dash
 
-    char_entries = [_brief_char_display(e, max_desc=max_desc) for e in _split_character_entries(characters)]
-    char_block = "\n".join(f"· {e}" for e in char_entries if e) if char_entries else dash
+    char_entries = [_card_char_display(e, max_chars=max_char) for e in _split_character_entries(characters)]
+    char_entries = [e for e in char_entries if e and e not in _KEY_EVENTS_TRIVIAL]
+    char_block = "\n".join(f"· {e}" for e in char_entries) if char_entries else dash
 
-    ev_entries = _split_event_entries(events, 5)
+    ev_entries = _split_event_entries(events, 3)
     ev_block = "\n".join(f"· {e}" for e in ev_entries) if ev_entries else dash
 
     return place_line, char_block, ev_block
@@ -358,20 +400,132 @@ def scrub_functional_fragment(fragment: str) -> str:
     return "\n".join(kept).strip()
 
 
+def normalize_mutation_marker_aliases(text: str) -> str:
+    """将模型多种突变标记写法统一为 ⟦mut⟧…⟦/mut⟧。"""
+    raw = (text or "").replace("\\n", "\n")
+    if not raw.strip():
+        return raw
+    # 模型误用 <<<mut>>> / <<mut>> 等角括号标记
+    raw = re.sub(r"<<+\s*/\s*mut\s*>>+", _MUT_CLOSE, raw, flags=re.I)
+    raw = re.sub(r"<<+\s*mut\s*>>+", _MUT_OPEN, raw, flags=re.I)
+    raw = re.sub(r"<{2,}\s*/?\s*mut\s*>{2,}", _MUT_CLOSE, raw, flags=re.I)
+    raw = re.sub(r"⟦\s*/\s*mut\s*⟧", _MUT_CLOSE, raw, flags=re.I)
+    raw = re.sub(r"⟦\s*mut\s*⟧", _MUT_OPEN, raw, flags=re.I)
+    raw = re.sub(r"\[/mut\]", _MUT_CLOSE, raw, flags=re.I)
+    raw = re.sub(r"\[mut\]", _MUT_OPEN, raw, flags=re.I)
+    raw = raw.replace("【/突变】", _MUT_CLOSE).replace("【突变】", _MUT_OPEN)
+    # 清理未成对残留的 <<< >>>
+    raw = re.sub(r"<<+(?![<])|>>+(?!>)", "", raw)
+    return raw
+
+
+def _normalize_diff_line(ln: str) -> str:
+    s = strip_mutation_markers((ln or "").strip())
+    s = re.sub(r"^[-•·]\s*", "", s)
+    s = re.sub(r"^【[^】]+】\s*", "", s)
+    return re.sub(r"\s+", "", s)
+
+
+def _line_similar_to_baseline(norm: str, base_norms: Set[str], base_lines: List[str]) -> bool:
+    if not norm:
+        return True
+    if norm in base_norms:
+        return True
+    from difflib import SequenceMatcher
+
+    for bl in base_lines:
+        bn = _normalize_diff_line(bl)
+        if bn and SequenceMatcher(None, norm, bn).ratio() >= 0.88:
+            return True
+    return False
+
+
+def inject_diff_mutation_markers(variant: str, baseline: str) -> str:
+    """无显式标记时，相对基准大纲为新增/改动行注入突变标记。"""
+    if not (variant or "").strip() or not (baseline or "").strip():
+        return variant
+    if _MUT_OPEN in variant or "⟦" in variant:
+        return variant
+    base_lines = [ln for ln in baseline.splitlines() if ln.strip()]
+    base_norms = {_normalize_diff_line(ln) for ln in base_lines}
+    out: List[str] = []
+    for ln in variant.splitlines():
+        stripped = ln.strip()
+        if not stripped:
+            out.append(ln)
+            continue
+        if stripped.startswith("【") and stripped.endswith("】"):
+            out.append(ln)
+            continue
+        if re.match(r"^#{1,3}\s", stripped):
+            out.append(ln)
+            continue
+        norm = _normalize_diff_line(ln)
+        if _line_similar_to_baseline(norm, base_norms, base_lines):
+            out.append(ln)
+            continue
+        bullet_m = re.match(r"^(\s*[-•·]\s*)(.+)$", ln)
+        if bullet_m:
+            out.append(f"{bullet_m.group(1)}{_MUT_OPEN}{bullet_m.group(2)}{_MUT_CLOSE}")
+        else:
+            out.append(f"{_MUT_OPEN}{stripped}{_MUT_CLOSE}")
+    return "\n".join(out)
+
+
+def prepare_mutation_display_text(text: str, baseline: str = "") -> str:
+    """展示用：规范化标记；必要时按基准大纲 diff 补标。"""
+    raw = normalize_mutation_marker_aliases(text or "")
+    if _MUT_OPEN not in raw and "⟦" not in raw and (baseline or "").strip():
+        raw = inject_diff_mutation_markers(raw, baseline)
+    return raw
+
+
 def strip_mutation_markers(text: str) -> str:
     """移除反套路突变标记（含 LLM 误输出的 /mut、\\mut 等），供展示与扩写下游使用。"""
     raw = text or ""
     raw = raw.replace(_MUT_OPEN, "").replace(_MUT_CLOSE, "")
     raw = re.sub(r"⟦/?mut⟧?", "", raw, flags=re.I)
     raw = re.sub(r"(?<![\u4e00-\u9fffA-Za-z])\\?/?mut\b", "", raw, flags=re.I)
+    raw = re.sub(r"<<+\s*/?\s*mut\s*>>+", "", raw, flags=re.I)
+    raw = re.sub(r"<{2,}|>{2,}", "", raw)
     raw = raw.replace("⟦", "").replace("⟧", "")
     raw = re.sub(r"\s{2,}", " ", raw)
     return raw.strip()
 
 
-def _split_labeled_plot_clauses(text: str) -> List[str]:
+def format_prose_paragraphs(text: str, *, min_para_len: int = 72) -> str:
+    """将扩写正文整理为多段落（双换行分隔），提升可读性。"""
+    t = (text or "").strip()
+    if not t:
+        return t
+    t = re.sub(r"\r\n?", "\n", t)
+    if "\n\n" in t:
+        paras = [p.strip() for p in re.split(r"\n{2,}", t) if p.strip()]
+        return "\n\n".join(paras)
+    if "\n" in t:
+        return "\n\n".join(ln.strip() for ln in t.splitlines() if ln.strip())
+    sents = re.split(r"(?<=[。！？…])", t)
+    sents = [s.strip() for s in sents if s.strip()]
+    if len(sents) <= 2:
+        return t
+    paras: List[str] = []
+    buf = ""
+    for s in sents:
+        buf += s
+        if len(buf) >= min_para_len:
+            paras.append(buf.strip())
+            buf = ""
+    if buf.strip():
+        if paras and len(buf) < min_para_len // 2:
+            paras[-1] = (paras[-1] + buf).strip()
+        else:
+            paras.append(buf.strip())
+    return "\n\n".join(paras) if paras else t
+
+
+def _split_labeled_plot_clauses(text: str, *, preserve_mutations: bool = False) -> List[str]:
     """将「核心矛盾：…；阻碍：…」或「叙述…因果链：…」拆成多条。"""
-    s = strip_mutation_markers((text or "").strip())
+    s = (text or "").strip() if preserve_mutations else strip_mutation_markers((text or "").strip())
     if not s:
         return []
     label_pat = (
@@ -401,7 +555,7 @@ def _split_labeled_plot_clauses(text: str) -> List[str]:
     return chunks if chunks else [s]
 
 
-def expand_plot_conflict_bullets(body: str) -> str:
+def expand_plot_conflict_bullets(body: str, *, drop_obstacles: bool = False) -> str:
     """剧情逻辑师 / 冲突设计师：每条分点独占一行。"""
     raw = (body or "").strip()
     if not raw:
@@ -411,14 +565,23 @@ def expand_plot_conflict_bullets(body: str) -> str:
         s = ln.strip().lstrip("-·•").strip()
         if not s:
             continue
+        if drop_obstacles and re.match(r"^(阻碍|障碍|角色阻碍|具体阻碍)\s*[：:]", s):
+            continue
         for piece in _split_labeled_plot_clauses(s):
             piece = strip_mutation_markers(piece)
+            if drop_obstacles and re.match(r"^(阻碍|障碍|角色阻碍|具体阻碍)\s*[：:]", piece):
+                continue
             if piece:
                 bullets.append(f"- {piece}")
     return "\n".join(bullets) if bullets else raw
 
 
-def fragment_to_markdown_bullets(fragment: str) -> str:
+def strip_conflict_obstacle_lines(body: str) -> str:
+    """冲突设计师：移除「阻碍/障碍」分栏。"""
+    return expand_plot_conflict_bullets(body, drop_obstacles=True)
+
+
+def fragment_to_markdown_bullets(fragment: str, *, preserve_mutations: bool = False) -> str:
     """职能 fragment 转为分行列表（保留换行，不压成一行）。"""
     raw = scrub_functional_fragment(fragment)
     if not raw:
@@ -431,7 +594,7 @@ def fragment_to_markdown_bullets(fragment: str) -> str:
                 r"(?:核心矛盾|阻碍|戏剧冲突|因果链|关键突变|悬念)\s*[：:]",
                 ln,
             ):
-                lines.extend(_split_labeled_plot_clauses(ln))
+                lines.extend(_split_labeled_plot_clauses(ln, preserve_mutations=preserve_mutations))
             else:
                 lines.append(ln)
     if len(lines) < 2 and re.search(r"\s+-\s+", raw):
@@ -439,8 +602,10 @@ def fragment_to_markdown_bullets(fragment: str) -> str:
         if len(parts) >= 2:
             lines = parts
     if not lines:
-        one = re.sub(r"\s+", " ", strip_mutation_markers(raw)).strip()
+        one = re.sub(r"\s+", " ", (raw if preserve_mutations else strip_mutation_markers(raw))).strip()
         return f"- {one}" if one else "—"
+    if preserve_mutations:
+        return "\n".join(f"- {ln}" for ln in lines[:8])
     return "\n".join(f"- {strip_mutation_markers(ln)}" for ln in lines[:8])
 
 
@@ -452,9 +617,101 @@ def strip_assembly_beat_headers(text: str, beat_heading_word: str) -> str:
     if not (text or "").strip() or not (beat_heading_word or "").strip():
         return (text or "").strip()
     esc = re.escape(beat_heading_word.strip())
-    pat = re.compile(rf"^\s*#{{1,6}}\s*{esc}\s*\d+[^\n]*\n?", re.I | re.M)
+    pat = re.compile(rf"^\s*#{{1,6}}\s*(?:\*{{1,2}}\s*)?{esc}\s*\d+(?:\s*\*{{1,2}})?[^\n]*\n?", re.I | re.M)
     t = pat.sub("", text)
     return t.strip()
+
+
+def split_assembly_into_beats(
+    text: str,
+    *,
+    beat_heading_word: str,
+    n: int,
+) -> Dict[int, str]:
+    """按小节标题切分汇编全文，返回 {beat_index: body}。"""
+    raw = strip_mutation_markers((text or "").strip())
+    if not raw or n <= 0:
+        return {}
+    esc = re.escape((beat_heading_word or "").strip())
+    patterns = [
+        re.compile(
+            rf"^#{{1,6}}\s*(?:\*{{1,2}}\s*)?{esc}\s*(\d+)(?:\s*\*{{1,2}})?[^\n]*",
+            re.I | re.M,
+        ),
+        re.compile(r"^【第\s*(\d+)\s*节[^】]*】", re.M),
+    ]
+    matches: List[Tuple[int, int, int]] = []
+    for pat in patterns:
+        matches = []
+        for m in pat.finditer(raw):
+            idx = int(m.group(1)) - 1
+            if 0 <= idx < n:
+                matches.append((m.start(), m.end(), idx))
+        if matches:
+            break
+    if not matches:
+        return {}
+    matches.sort(key=lambda x: x[0])
+    out: Dict[int, str] = {}
+    for i, (_start, end, idx) in enumerate(matches):
+        next_start = matches[i + 1][0] if i + 1 < len(matches) else len(raw)
+        body = raw[end:next_start].strip()
+        if body:
+            out[idx] = body
+    return out
+
+
+def sync_assembly_outline_to_beats(
+    outline: str,
+    beats: List[Optional[Dict[str, Any]]],
+    *,
+    beat_heading_word: str,
+    n: int,
+) -> Tuple[str, bool]:
+    """
+    将反套路/汇编全文写回各小节 merged 字段，并返回带小节标题的汇编文本。
+    返回 (assembled_text, beats_updated)。
+    """
+    cleaned = strip_mutation_markers((outline or "").strip())
+    if not cleaned:
+        return "", False
+    sections = split_assembly_into_beats(
+        cleaned, beat_heading_word=beat_heading_word, n=n
+    )
+    h = (beat_heading_word or "").strip()
+    updated = False
+    if sections:
+        for idx, body in sections.items():
+            if idx < 0 or idx >= n or idx >= len(beats):
+                continue
+            b = beats[idx]
+            if not isinstance(b, dict):
+                continue
+            b = dict(b)
+            body = format_functional_merged_outline(body)
+            b["merged"] = body
+            b["merged_outline"] = body
+            if b.get("mode") != "typified":
+                b["mode"] = b.get("mode") or "functional"
+            beats[idx] = b
+            updated = True
+        parts: List[str] = []
+        for i in range(n):
+            b = beats[i]
+            if not b:
+                continue
+            body = (b.get("merged") or b.get("merged_outline") or "").strip()
+            if body:
+                parts.append(f"### **{h} {i + 1}**\n{body}")
+        assembled = "\n\n".join(parts)
+        return assembled or cleaned, updated
+    if len(beats) == 1 and beats[0] and isinstance(beats[0], dict):
+        b = dict(beats[0])
+        b["merged"] = cleaned
+        b["merged_outline"] = cleaned
+        beats[0] = b
+        return f"### **{h} 1**\n{cleaned}", True
+    return cleaned, False
 
 
 def scrub_expanded_prose_artifacts(text: str) -> str:
@@ -506,6 +763,8 @@ def repair_colon_split_name(name: str, desc: str, *, context: str = "") -> Tuple
     d = (desc or "").strip()
     if not n or not d:
         return n, d
+    if _is_protected_compound_name(n):
+        return n, d
     ctx = context or ""
     if d[0] not in _COLON_SPLIT_NAME_SUFFIX:
         return n, d
@@ -516,6 +775,13 @@ def repair_colon_split_name(name: str, desc: str, *, context: str = "") -> Tuple
         return n, d
     merged = n + d[0]
     rest = d[1:].lstrip("，,、/ ")
+    if (
+        not _is_protected_compound_name(n)
+        and _is_protected_compound_name(merged)
+        and len(merged) == len(n) + 1
+        and d[0] in _SCENE_GLUED_ON_NAME
+    ):
+        return n, d
     if merged in ctx or re.search(re.escape(merged), ctx):
         return merged, rest or d
     if re.fullmatch(r"阿[\u4e00-\u9fff]{2,3}丽", merged):
@@ -537,7 +803,9 @@ _NON_PERSON_LABELS = frozenset(
         "AI",
         "IT",
         "程师",
+        "程计划",
         "工程师",
+        "计划",
         "地质师",
         "研究员",
         "时间锚点",
@@ -704,7 +972,15 @@ _VERB_NAME_TAIL = re.compile(
     r"(出现|突然|沉默|首次|犯|却|实|无|用电|回应|坚持|进入|离开|开始|结束|"
     r"激|追|问|说|看|听|走|来|去|地|得|了|着|过|等|后|前|中外|首)$"
 )
-_SINGLE_CHAR_VERB_TAIL = frozenset("无犯却实说问看听走来去等地得了着过等后前中外首因与时第用制抓止住说")
+_SINGLE_CHAR_VERB_TAIL = frozenset(
+    "无犯却实说问看听走来去等地得了着过等后前中外首因与时第用制抓止住说面向施触试图觉察"
+)
+_SCULPTOR_GLUED_VERB = frozenset("面向施触试图觉察往到见的地得了着过")
+_SCENE_GLUED_ON_NAME = frozenset("古国城馆厅室皇朝代纪世疆镇村寺塔堡域油魂")
+_BOGUS_NAME_PREFIX = re.compile(r"^(曾是|原来|曾经|如今|以前|当时|当年|其中|作为|一位|一名|一名叫)")
+_STANDALONE_ROLE_LABEL = frozenset(
+    {"工人", "学生", "导师", "记者", "教授", "祭司", "使者", "工程师", "研究员", "研究生", "馆员", "护林员"}
+)
 _CN_SURNAMES = (
     "张李王刘陈林赵周马杨黄吴许苏何顾罗郑谢宋唐韩冯于董袁邓曹曾彭蒋蔡余杜叶程魏吕丁沈任姚卢姜崔谭陆汪范金石廖贾夏韦付方邹熊孟秦白江阎薛尹段雷黎史龙陶贺郝龚邵万钱严武戴莫孔向汤"
 )
@@ -761,11 +1037,24 @@ def _is_setting_field_label(name: str) -> bool:
     return n in _SETTING_FIELD_LABELS or n in _TIME_SCENE_NON_PERSON
 
 
+_UYGHUR_COMPOUND_NAME = re.compile(
+    r"^(?:艾|阿|热|穆|哈|卡|赛|吐|买|依|吾|古|巴|托)[\u4e00-\u9fff]{0,3}(?:买提|古丽|依木|夏木|克力|兰|江|汗|尔|娜|莎|木|提)$"
+)
+
+
+def _is_protected_compound_name(name: str) -> bool:
+    """维吾尔/哈萨克式复合名（如艾买提、阿依古丽）不得截断后缀。"""
+    n = (name or "").strip()
+    return bool(n and (_UYGHUR_COMPOUND_NAME.fullmatch(n) or _UYGHUR_NAME_SUFFIX.search(n) and len(n) >= 3))
+
+
 def _canonical_person_name(name: str) -> str:
     """将「阿依古丽出现」「但艾尼瓦尔」等规整为真实姓名。"""
     n = _normalize_extracted_name((name or "").strip())
     if not n:
         return ""
+    if _is_protected_compound_name(n):
+        return n
     for _ in range(4):
         changed = False
         if _INVALID_NAME_PREFIX.match(n):
@@ -775,6 +1064,11 @@ def _canonical_person_name(name: str) -> str:
             if len(n) - cut < 2:
                 continue
             base, suf = n[:-cut], n[-cut:]
+            if cut == 1 and suf == "提" and base.endswith("买"):
+                continue
+            if cut == 1 and suf in ("丽", "木", "尔", "兰") and len(base) >= 2:
+                if _is_protected_compound_name(n):
+                    continue
             tail_hit = (
                 (cut == 1 and suf in _SINGLE_CHAR_VERB_TAIL)
                 or bool(_VERB_NAME_TAIL.fullmatch(suf))
@@ -783,6 +1077,8 @@ def _canonical_person_name(name: str) -> str:
             if not tail_hit:
                 continue
             if _STRICT_PERSON_NAME.fullmatch(base) and _looks_like_person_name(base):
+                if _is_protected_compound_name(n):
+                    break
                 n = base
                 changed = True
                 break
@@ -803,7 +1099,80 @@ def _canonical_person_name(name: str) -> str:
             n = cand
     if re.fullmatch(r"严谨务|务实.+|.+务$", n) and not _STRICT_PERSON_NAME.fullmatch(n):
         return ""
+    return _trim_scene_glued_suffix_from_name(n)
+
+
+def _trim_scene_glued_suffix_from_name(name: str) -> str:
+    """剥离误粘在完整复合名后的场景字（阿依古丽古→阿依古丽，艾买提古→艾买提）。"""
+    n = (name or "").strip()
+    if not n or _is_protected_compound_name(n) or len(n) < 4:
+        return n
+    for extra in (2, 1):
+        if len(n) <= extra + 2:
+            continue
+        base = n[:-extra]
+        if _is_protected_compound_name(base) and (
+            extra == 2 or n[-1] in _SCENE_GLUED_ON_NAME
+        ):
+            return base
     return n
+
+
+def _strip_glued_verb_from_name(name: str) -> str:
+    """剥离误粘在姓名末尾的动词字（艾买提面→艾买提）。"""
+    n = (name or "").strip()
+    if not n or _is_protected_compound_name(n):
+        return n
+    for _ in range(4):
+        if len(n) >= 3 and n[-1] in _SCULPTOR_GLUED_VERB:
+            base = n[:-1]
+            if _is_protected_compound_name(base) or (
+                _STRICT_PERSON_NAME.fullmatch(base) and _looks_like_person_name(base)
+            ):
+                n = base
+                continue
+        break
+    return _trim_scene_glued_suffix_from_name(n)
+
+
+def _finalize_sculptor_name(name: str, *, context: str = "") -> str:
+    """功能化人物行专用：规整姓名，仅向上下文中的完整复合名扩展。"""
+    n = _strip_glued_verb_from_name(_normalize_extracted_name((name or "").strip()))
+    if not n:
+        return ""
+    if _BOGUS_NAME_PREFIX.match(n) or n in _STANDALONE_ROLE_LABEL:
+        return ""
+    ctx = (context or "").strip()
+    if ctx:
+        best = n
+        for m in re.finditer(r"[\u4e00-\u9fff]{2,5}", ctx):
+            cand = m.group(0)
+            if len(cand) <= len(n) or not cand.startswith(n[: min(2, len(n))]):
+                continue
+            cand = _strip_glued_verb_from_name(cand)
+            if (
+                cand
+                and _is_protected_compound_name(cand)
+                and _STRICT_PERSON_NAME.fullmatch(cand)
+                and _looks_like_person_name(cand)
+                and len(cand) >= len(best)
+            ):
+                best = cand
+        n = best
+    return n if _looks_like_person_name(n) else ""
+
+
+def _normalize_sculptor_line_name(name: str, *, context: str = "") -> str:
+    """人物塑造师展示用姓名：严格规整 + 剧情并列名放宽。"""
+    fin = _finalize_sculptor_name(name, context=context)
+    if fin:
+        return fin
+    n = _strip_glued_verb_from_name((name or "").strip())
+    if not n:
+        return ""
+    from narrativeloom.domain.character_names import _is_loose_cast_name
+
+    return n if _is_loose_cast_name(n, context=context) else ""
 
 
 def _is_sculptor_section_title(title: str) -> bool:
@@ -820,6 +1189,8 @@ def _looks_like_person_name(name: str) -> bool:
     if _is_meta_character_label(n):
         return False
     if n in ("姓名", "人物", "角色", "Name", "Character"):
+        return False
+    if _BOGUS_NAME_PREFIX.match(n) or n in _STANDALONE_ROLE_LABEL:
         return False
     if re.search(r"^(严谨|务实|状态|动机|性格|身份)", n):
         return False
@@ -972,7 +1343,7 @@ def filter_character_sculptor_fragment(
     target_total: Optional[int] = None,
     locked_names: Optional[List[str]] = None,
 ) -> str:
-    from character_names import filter_sculptor_fragment
+    from narrativeloom.domain.character_names import filter_sculptor_fragment
 
     return filter_sculptor_fragment(
         fragment,
@@ -992,6 +1363,7 @@ def _names_from_bullet_lines(text: str) -> List[str]:
         if not m:
             continue
         name = m.group(1).strip()
+        name = _normalize_sculptor_line_name(name, context=text)
         if _is_setting_field_label(name):
             continue
         if not _is_pure_person_name(name) or name in seen:
@@ -1002,15 +1374,49 @@ def _names_from_bullet_lines(text: str) -> List[str]:
 
 
 def extract_character_names_from_text(text: str, *, sculptor_sections_only: bool = False) -> List[str]:
-    from character_names import extract_character_names
+    from narrativeloom.domain.character_names import extract_character_names
 
     return extract_character_names(text, sculptor_sections_only=sculptor_sections_only)
 
 
 def merge_unique_character_names(*name_lists: List[str]) -> List[str]:
-    from character_names import merge_unique_names
+    from narrativeloom.domain.character_names import merge_unique_names
 
     return merge_unique_names(*name_lists)
+
+
+def ensure_role_blocks_on_own_lines(text: str, role_names: Optional[List[str]] = None) -> str:
+    """将行内粘连的【职能名】拆到独立行，便于小节汇编阅读。"""
+    raw = (text or "").strip()
+    if not raw or "【" not in raw:
+        return raw
+    aliases = {
+        "设定构筑师": "设定构建师",
+        "设定建筑师": "设定构建师",
+    }
+    for src, dst in aliases.items():
+        raw = raw.replace(f"【{src}】", f"【{dst}】")
+    raw = re.sub(r"([^\n\r])(【[^】]+】)", r"\1\n\2", raw)
+    for rn in _known_role_names(role_names):
+        raw = re.sub(
+            rf"([^\n\r])(?:【)?{re.escape(rn)}(?:】)?\s*[：:]",
+            rf"\1\n【{rn}】\n",
+            raw,
+        )
+    raw = re.sub(r"\n{3,}", "\n\n", raw)
+    return raw.strip()
+
+
+def format_functional_merged_outline(text: str, role_names: Optional[List[str]] = None) -> str:
+    """规范功能化小节拼合稿：职能标题独立成行，分块之间空行分隔。"""
+    raw = ensure_role_blocks_on_own_lines(text, role_names)
+    if not raw:
+        return ""
+    raw = normalize_outline_role_headers(raw, role_names)
+    sections = parse_merge_role_sections(raw, role_names=role_names)
+    if not sections or sections[0][0] == "【全文】":
+        return raw
+    return rebuild_merge_sections(sections)
 
 
 def rebuild_merge_sections(sections: List[Tuple[str, str]]) -> str:
@@ -1019,6 +1425,51 @@ def rebuild_merge_sections(sections: List[Tuple[str, str]]) -> str:
         b = (body or "").strip()
         chunks.append(f"{title}\n{b}" if b else title)
     return "\n\n".join(chunks)
+
+
+def assemble_functional_beats_by_role(
+    beat_texts: List[str],
+    *,
+    role_names: Optional[List[str]] = None,
+) -> str:
+    """功能化多小节汇编：每个人格标题只出现一次，汇总各小节 bullet。"""
+    order = _known_role_names(role_names)
+    buckets: Dict[str, List[str]] = {rn: [] for rn in order} if order else {}
+    extra_order: List[str] = []
+
+    for text in beat_texts:
+        if not (text or "").strip():
+            continue
+        for title, body in parse_merge_role_sections(text, role_names=role_names):
+            key = _role_title_key(title)
+            if key not in buckets:
+                buckets[key] = []
+                if key not in extra_order:
+                    extra_order.append(key)
+            for ln in (body or "").splitlines():
+                s = ln.strip()
+                if not s:
+                    continue
+                s = re.sub(r"^[-*•·]+\s*", "", s).strip()
+                if s and s not in _KEY_EVENTS_TRIVIAL:
+                    buckets[key].append(s)
+
+    if order:
+        keys = [k for k in order if buckets.get(k)]
+        keys.extend(k for k in extra_order if k not in keys)
+    else:
+        keys = extra_order or [k for k, v in buckets.items() if v]
+
+    sections: List[Tuple[str, str]] = []
+    for key in keys:
+        bullets = buckets.get(key) or []
+        if not bullets:
+            continue
+        body = "\n".join(f"- {b}" if not b.startswith("-") else b for b in bullets)
+        sections.append((f"【{key}】", body))
+    if sections:
+        return rebuild_merge_sections(sections)
+    return "\n\n".join(t for t in beat_texts if (t or "").strip())
 
 
 _DEFAULT_FN_ROLE_NAMES = (
@@ -1105,7 +1556,7 @@ def _fallback_section_body(role_name: str, staged: List[Tuple[str, str]]) -> str
                 break
         if picked:
             return "\n".join(picked)
-        return "- 核心矛盾：与本节剧情目标相对立\n- 角色阻碍：—"
+        return "- 核心矛盾：与本节剧情目标相对立\n- 戏剧冲突：—"
     if "设定" in role_name or "Setting" in role_name:
         return "—"
     if _is_sculptor_section_title(f"【{role_name}】"):
@@ -1121,10 +1572,13 @@ def _ordered_unified_sections(
 ) -> List[Tuple[str, str]]:
     """按用户选中的职能顺序输出，并补全缺失分块。"""
     order = _known_role_names(role_names)
+    order = [rn for rn in order if not _is_continuity_section_title(f"【{rn}】")]
     if not order:
-        return staged
+        return [(t, b) for t, b in staged if not _is_continuity_section_title(t)]
     out: List[Tuple[str, str]] = []
     for rn in order:
+        if _is_continuity_section_title(f"【{rn}】"):
+            continue
         body = _find_section_body(staged, rn)
         if not (body or "").strip():
             body = _fallback_section_body(rn, staged)
@@ -1495,6 +1949,8 @@ def _infer_sculptor_trait(name: str, plot_text: str, setting_text: str = "") -> 
             continue
         if re.match(r"^[的地得与和用]", tail):
             continue
+        if re.match(r"^(必须|应当|需要|不得不|面临|陷入|争执|抉择|对峙|冲突|悬念)", tail):
+            continue
         if _is_trait_description(tail):
             snippet = tail if len(tail) <= 120 else tail[:120]
             return f"- {name}：{snippet}"
@@ -1556,7 +2012,10 @@ def _polish_sculptor_line(
     m = _CHAR_NAME_LINE.match(probe)
     if not m:
         return s if re.match(r"^[-•·]\s*", s) else f"- {s}"
-    name = _canonical_person_name(m.group(1).strip())
+    ctx = "\n".join(x for x in (plot_text, setting_text) if x)
+    from narrativeloom.utils.display_utils import _normalize_sculptor_line_name
+
+    name = _normalize_sculptor_line_name(m.group(1).strip(), context=ctx)
     rest = probe[m.end() :].strip()
     if not name or not _is_pure_person_name(name):
         return ""
@@ -1578,7 +2037,7 @@ def complete_sculptor_body(
     locked_names: Optional[List[str]] = None,
     sculpt_target: int = 2,
 ) -> str:
-    from character_names import complete_sculptor_section
+    from narrativeloom.domain.character_names import complete_sculptor_section
 
     plot = list(plot_sources or [])
     setting_blob = "\n".join(s for s in (setting_sources or []) if (s or "").strip())
@@ -1600,6 +2059,8 @@ def _is_meta_character_label(name: str) -> bool:
     if not n:
         return True
     if n in _NON_PERSON_LABELS:
+        return True
+    if n.endswith("计划") and len(n) <= 5:
         return True
     if _META_NAME_SUFFIX.match(n):
         return True
@@ -1781,6 +2242,7 @@ def normalize_single_unified_outline(
         return ""
     if _looks_like_story_outline(txt):
         return txt.strip()
+    txt = ensure_role_blocks_on_own_lines(txt, role_names)
     txt = normalize_outline_role_headers(txt, role_names)
     sections = parse_merge_role_sections(txt, role_names=role_names)
     if not sections or sections[0][0] == "【全文】":
@@ -1800,6 +2262,8 @@ def normalize_single_unified_outline(
     setting_sources: List[str] = []
     staged: List[Tuple[str, str]] = []
     for title, body in sections:
+        if _is_continuity_section_title(title):
+            continue
         body = trim_section_body_leak(body)
         body = _strip_role_header_lines_from_body(body, role_names)
         staged.append((title, body))
@@ -1811,12 +2275,15 @@ def normalize_single_unified_outline(
             narrative_sources.append(body)
     if not narrative_sources:
         narrative_sources = list(plot_sources)
+    all_narrative = list(plot_sources) + list(narrative_sources)
     processed: List[Tuple[str, str]] = []
     for title, body in staged:
+        if _is_continuity_section_title(title):
+            continue
         if _is_sculptor_section_title(title):
             body = complete_sculptor_body(
                 body,
-                plot_sources=narrative_sources,
+                plot_sources=all_narrative if all_narrative else narrative_sources,
                 setting_sources=setting_sources,
                 locked_names=locked,
                 sculpt_target=sculpt_target,
@@ -1825,7 +2292,25 @@ def normalize_single_unified_outline(
                 body = abbreviate_established_sections(
                     body, title=title, beat_index=beat_index, locked_names=locked
                 )
-            body = condense_role_body(body, max_lines=sculpt_target, max_chars=120)
+            body = condense_role_body(body, max_lines=sculpt_target, max_chars=44)
+            lines_out: List[str] = []
+            name_ctx = "\n".join(all_narrative)
+            for ln in body.splitlines():
+                s = ln.strip()
+                if not s:
+                    continue
+                if "：" in s or ":" in s:
+                    probe = s if s.startswith("-") else f"- {s}"
+                    name, _, desc = probe.lstrip("-·• ").partition("：")
+                    if ":" in name and "：" not in name:
+                        name, _, desc = probe.lstrip("-·• ").partition(":")
+                    name = _normalize_sculptor_line_name(name.strip(), context=name_ctx)
+                    desc = sanitize_sculptor_description(desc)
+                    if name and desc:
+                        lines_out.append(f"- {name}：{desc}")
+                else:
+                    lines_out.append(s)
+            body = "\n".join(lines_out) if lines_out else body
         elif "设定构建" in title or "Setting" in title:
             body = format_setting_architect_body(body)
             body = abbreviate_established_sections(
@@ -1838,7 +2323,8 @@ def normalize_single_unified_outline(
             body = expand_plot_conflict_bullets(body)
             body = condense_role_body(body, max_lines=5, max_chars=plot_cap)
         elif "冲突设计" in title or "Conflict" in title:
-            body = expand_plot_conflict_bullets(body)
+            body = strip_conflict_obstacle_lines(body)
+            body = expand_plot_conflict_bullets(body, drop_obstacles=True)
             body = condense_role_body(body, max_lines=4, max_chars=plot_cap)
         elif "连贯" in title or "Consistency" in title:
             body = condense_role_body(body, max_lines=2, max_chars=36)
@@ -1926,11 +2412,14 @@ def _outline_line_to_li(ln: str, *, highlight_mutations: bool) -> str:
     import html as html_mod
 
     ln = re.sub(r"^-\s*", "", (ln or "").strip())
-    ln = re.sub(r"(?<![\u4e00-\u9fffA-Za-z])\\?/?mut\s*$", "", ln, flags=re.I).strip()
     if not ln:
         return ""
     if highlight_mutations and (_MUT_OPEN in ln or "⟦" in ln or "⟧" in ln):
-        return f"<li>{_html_escape_mutations(ln)}</li>"
+        inner = _html_escape_mutations(ln)
+        core = re.sub(r"^-\s*", "", ln.strip())
+        if core.startswith(_MUT_OPEN) and core.endswith(_MUT_CLOSE) and core.count(_MUT_OPEN) == 1:
+            return f'<li class="nl-mut-li">{inner}</li>'
+        return f"<li>{inner}</li>"
     return f"<li>{html_mod.escape(_strip_orphan_mutation_marks(ln))}</li>"
 
 
@@ -1940,7 +2429,7 @@ def _json_object_to_role_outline(obj: Any) -> str:
         s = obj.strip()
         if s.startswith("{") and "【" not in s:
             try:
-                from llm_client import _parse_json_content
+                from narrativeloom.service.llm_client import _parse_json_content
 
                 parsed = _parse_json_content(s)
                 if isinstance(parsed, dict):
@@ -2008,8 +2497,16 @@ def _json_object_to_role_outline(obj: Any) -> str:
         if lines:
             buckets.setdefault(role, []).extend(lines)
 
-    order = [f"【{n}】" for n in _DEFAULT_FN_ROLE_NAMES if n and "【" not in n][:8]
-    order.extend(["【氛围渲染师】", "【对话设计师】", "【细节填充师】", "【连贯性校验师】", "【反套路创意师】"])
+    order = [
+        f"【{n}】"
+        for n in _DEFAULT_FN_ROLE_NAMES
+        if n and "【" not in n and not _is_continuity_section_title(f"【{n}】")
+    ][:8]
+    order.extend(
+        r
+        for r in ("【氛围渲染师】", "【对话设计师】", "【细节填充师】", "【反套路创意师】")
+        if not _is_continuity_section_title(r)
+    )
     chunks: List[str] = []
     seen: Set[str] = set()
     for role in order:
@@ -2034,7 +2531,7 @@ def _looks_like_role_json_object(data: dict) -> bool:
 
 def repair_antitrope_outline(text: str) -> str:
     """从反套路模型返回中剥离 JSON 包装、代码围栏与转义，还原可读大纲。"""
-    from llm_client import _parse_json_content
+    from narrativeloom.service.llm_client import _parse_json_content
 
     raw = strip_trailing_json_leak(unescape_display_text(text or "")).strip()
     if not raw:
@@ -2076,19 +2573,106 @@ def repair_antitrope_outline(text: str) -> str:
     return raw.strip()
 
 
-def _story_outline_to_html(text: str, *, highlight_mutations: bool = False) -> str:
+def _inject_section_headers_from_baseline(variant: str, baseline: str) -> str:
+    """反套路输出缺小节标题时，按基准汇编补回 ### **小节 n**。"""
+    headers: List[str] = []
+    for ln in (baseline or "").splitlines():
+        lab = _story_section_heading_label(ln.strip())
+        if lab:
+            headers.append(f"### **{lab}**")
+    if not headers:
+        return variant
+    chunks = re.split(r"(?=【设定构建师】|【Setting Architect】)", variant or "")
+    chunks = [c.strip() for c in chunks if c.strip()]
+    if len(chunks) <= 1:
+        return variant
+    out: List[str] = []
+    for i, chunk in enumerate(chunks):
+        if i < len(headers):
+            out.append(headers[i])
+        out.append(chunk)
+    return "\n\n".join(out)
+
+
+def _story_outline_mixed_html(
+    text: str,
+    *,
+    highlight_mutations: bool = False,
+    mutation_baseline: str = "",
+) -> str:
+    """含 ### 小节标题 + 【职能】分块的反套路大纲展示。"""
+    import html as html_mod
+
+    parts = re.split(r"(?=^#{1,3}\s)", text or "", flags=re.M)
+    chunks: List[str] = []
+    for part in parts:
+        seg = part.strip()
+        if not seg:
+            continue
+        lines = [ln for ln in seg.splitlines() if ln.strip()]
+        if not lines:
+            continue
+        head = lines[0].strip()
+        body = "\n".join(lines[1:]).strip()
+        sec_label = _story_section_heading_label(head)
+        if sec_label:
+            chunks.append(f'<div class="nl-fn-merge-role"><strong>{html_mod.escape(sec_label)}</strong></div>')
+        if body:
+            chunks.append(
+                outline_to_display_html(
+                    body,
+                    highlight_mutations=highlight_mutations,
+                    role_names=list(_DEFAULT_FN_ROLE_NAMES),
+                    outline_kind="roles",
+                    mutation_baseline=mutation_baseline,
+                )
+            )
+    return "".join(chunks) if chunks else f'<pre class="nl-outline-pre">{html_mod.escape(text)}</pre>'
+
+
+def _story_section_heading_label(line: str) -> Optional[str]:
+    """识别小节分段标题行（含 ### **小节 n**）。"""
+    s = (line or "").strip()
+    if not s:
+        return None
+    m = re.match(r"^#{1,6}\s*(.+)$", s)
+    if m:
+        label = m.group(1).strip().strip("*").strip()
+        if re.match(r"^(小节|Section)\s*\d+", label, re.I):
+            return label
+    m2 = re.match(r"^【第\s*(\d+)\s*节(?:\s*[·•\-—]\s*(.+?))?\s*】$", s)
+    if m2:
+        tail = (m2.group(2) or "").strip()
+        return f"小节 {m2.group(1)}" + (f" · {tail}" if tail else "")
+    if re.match(r"^(小节|Section)\s*\d+\b", s, re.I):
+        return s
+    return None
+
+
+def _story_outline_to_html(text: str, *, highlight_mutations: bool = False, mutation_baseline: str = "") -> str:
     """反套路/全文大纲：按小节或职能分块展示。"""
     import html as html_mod
 
     raw = repair_antitrope_outline(text)
+    if highlight_mutations:
+        raw = prepare_mutation_display_text(raw, mutation_baseline)
     if not raw:
         return '<p class="nl-empty-dash">—</p>'
     if "【设定构建师】" in raw or "【人物塑造师】" in raw or "【剧情逻辑师】" in raw:
+        if not re.search(r"^#{1,3}\s", raw, re.M) and re.search(r"^#{1,3}\s", mutation_baseline or "", re.M):
+            raw = _inject_section_headers_from_baseline(raw, mutation_baseline)
+        if re.search(r"^#{1,3}\s", raw, re.M):
+            return _story_outline_mixed_html(
+                raw,
+                highlight_mutations=highlight_mutations,
+                mutation_baseline=mutation_baseline,
+            )
         return outline_to_display_html(
             raw,
             highlight_mutations=highlight_mutations,
             role_names=list(_DEFAULT_FN_ROLE_NAMES),
             outline_kind="roles",
+            mutation_baseline=mutation_baseline,
         )
     parts = re.split(r"(?=^#{1,3}\s|【第\s*\d+)", raw, flags=re.M)
     chunks: List[str] = []
@@ -2101,8 +2685,11 @@ def _story_outline_to_html(text: str, *, highlight_mutations: bool = False) -> s
             continue
         head = lines[0].strip()
         body = "\n".join(lines[1:]).strip()
-        if re.match(r"^#{1,3}\s", head) or re.match(r"^【第", head):
-            label = re.sub(r"^#{1,3}\s*", "", head).strip()
+        sec_label = _story_section_heading_label(head)
+        if sec_label:
+            chunks.append(f'<div class="nl-fn-merge-role"><strong>{html_mod.escape(sec_label)}</strong></div>')
+        elif re.match(r"^#{1,3}\s", head) or re.match(r"^【第", head):
+            label = re.sub(r"^#{1,3}\s*", "", head).strip().strip("*").strip()
             chunks.append(f'<div class="nl-fn-merge-role"><strong>{html_mod.escape(label)}</strong></div>')
         else:
             body = seg
@@ -2112,7 +2699,7 @@ def _story_outline_to_html(text: str, *, highlight_mutations: bool = False) -> s
             para = _html_escape_mutations(body).replace("\n", "<br/>")
             chunks.append(f'<p class="nl-story-seg">{para}</p>')
             continue
-        md = fragment_to_markdown_bullets(body)
+        md = fragment_to_markdown_bullets(body, preserve_mutations=highlight_mutations)
         if md == "—":
             chunks.append('<p class="nl-empty-dash">—</p>')
         else:
@@ -2136,15 +2723,22 @@ def outline_to_display_html(
     highlight_mutations: bool = False,
     role_names: Optional[List[str]] = None,
     outline_kind: str = "roles",
+    mutation_baseline: str = "",
 ) -> str:
     """将拼合大纲转为 HTML；outline_kind=story 用于反套路全文。"""
     import html as html_mod
 
     if outline_kind == "story":
-        return _story_outline_to_html(text, highlight_mutations=highlight_mutations)
+        return _story_outline_to_html(
+            text,
+            highlight_mutations=highlight_mutations,
+            mutation_baseline=mutation_baseline,
+        )
 
     roles = _known_role_names(role_names)
     raw = normalize_outline_role_headers(strip_trailing_json_leak(unescape_display_text(text)), roles)
+    if highlight_mutations:
+        raw = prepare_mutation_display_text(raw, mutation_baseline)
     if not raw:
         return '<p class="nl-empty-dash">—</p>'
 
@@ -2153,9 +2747,11 @@ def outline_to_display_html(
         if sections and sections[0][0] != "【全文】":
             chunks: List[str] = []
             for title, body in sections:
+                if _is_continuity_section_title(title):
+                    continue
                 label = _role_title_key(title)
                 chunks.append(f'<div class="nl-fn-merge-role"><strong>{html_mod.escape(label)}</strong></div>')
-                md = fragment_to_markdown_bullets(body)
+                md = fragment_to_markdown_bullets(body, preserve_mutations=highlight_mutations)
                 if md == "—":
                     chunks.append('<p class="nl-empty-dash">—</p>')
                 else:
@@ -2172,7 +2768,7 @@ def outline_to_display_html(
     if highlight_mutations and (_MUT_OPEN in raw or "⟧" in raw):
         return f'<pre class="nl-outline-pre">{_html_escape_mutations(raw)}</pre>'
 
-    md = fragment_to_markdown_bullets(raw)
+    md = fragment_to_markdown_bullets(raw, preserve_mutations=highlight_mutations)
     if md == "—":
         return '<p class="nl-empty-dash">—</p>'
     items: List[str] = []
@@ -2192,7 +2788,12 @@ def outline_to_display_html(
         if not in_ul:
             items.append('<ul class="nl-ul">')
             in_ul = True
-        items.append(f"<li>{html_mod.escape(ln)}</li>")
+        if highlight_mutations and (_MUT_OPEN in ln or "⟦" in ln):
+            li = _outline_line_to_li(ln, highlight_mutations=True)
+            if li:
+                items.append(li)
+        else:
+            items.append(f"<li>{html_mod.escape(_strip_orphan_mutation_marks(ln))}</li>")
     if in_ul:
         items.append("</ul>")
     return "".join(items) if items else '<p class="nl-empty-dash">—</p>'

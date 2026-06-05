@@ -10,9 +10,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 
-from display_utils import (
+from narrativeloom.config.settings import PROJECT_ROOT
+from narrativeloom.utils.display_utils import (
     coerce_display_text,
     filter_character_sculptor_fragment,
+    format_prose_paragraphs,
     key_events_meaningful,
     normalize_single_unified_outline,
     parse_merge_role_sections,
@@ -20,19 +22,26 @@ from display_utils import (
     scrub_functional_fragment,
     split_concatenated_unified_plans,
     strip_trailing_json_leak,
+    typified_characters_meaningful,
     unescape_display_text,
 )
-from llm_unified import _normalize_base_url, complete_chat, default_api_key_from_env, env_llm_defaults
-from personas import (
+from narrativeloom.service.llm_unified import _normalize_base_url, complete_chat, default_api_key_from_env, env_llm_defaults
+from narrativeloom.domain.personas import (
     antitrope_role_name,
     antitrope_role_task,
     functional_role_order,
+    filter_unified_plan_role_names,
     get_functional_parallel_personas,
     get_functional_personas,
     is_character_sculptor_role,
+    is_continuity_checker_role,
+    is_unified_plan_excluded_role,
 )
 
-load_dotenv()
+load_dotenv(PROJECT_ROOT / ".env")
+
+
+TYPIFIED_KEY_EVENTS_COUNT = 3
 
 
 def _json_sanitize(s: str) -> str:
@@ -135,7 +144,7 @@ def _backfill_typified_key_events(
     if lang == "en":
         system = (
             "You write ONLY the key_events string for one story section. Output JSON only, no markdown: "
-            "{\"key_events\":\"...\"} . The value is ONE string with 4–6 lines separated by \\n; "
+            "{\"key_events\":\"...\"} . The value is ONE string with exactly 3 lines separated by \\n; "
             "each line starts with hyphen-minus followed by space as a bullet; "
             "each line one concrete causal beat aligned with the locked setting and cast; match the genre persona angle."
         )
@@ -147,7 +156,7 @@ def _backfill_typified_key_events(
     else:
         system = (
             "你只负责补全一个小节的「核心事件」字段。只输出 JSON，不要 Markdown："
-            '{"key_events":"……"} 。key_events 为单个字符串，内含 4～6 行，用 \\n 换行；'
+            '{"key_events":"……"} 。key_events 为单个字符串，内含恰好 3 行，用 \\n 换行；'
             "每行以「- 」开头；每行一条完整事件或转折，必须与上方已定设定、人物一致，并体现题材人格「"
             + genre_name
             + "」的典型节奏；禁止空话、禁止只输出一个减号、禁止复述设定原文。"
@@ -167,6 +176,62 @@ def _backfill_typified_key_events(
         loose = _extract_typified_fields_loose(raw)
         ke = str(loose.get("key_events", "")).strip()
     return ke.strip() if key_events_meaningful(ke) else ""
+
+
+def _backfill_typified_characters(
+    cfg: Dict[str, Any],
+    *,
+    setting: str,
+    key_events: str,
+    seed: str,
+    beat_title: str,
+    beat_hint: str,
+    genre_name: str,
+    genre_hint: str,
+    prior_summary: str,
+    locked_names: Optional[List[str]] = None,
+    lang: str,
+) -> str:
+    """主生成 JSON 漏字段时，单独补全 characters。"""
+    locked_txt = "、".join(locked_names or []) if locked_names else ""
+    if lang == "en":
+        system = (
+            "You write ONLY the characters string for one story section. Output JSON only: "
+            '{"characters":"..."} . The value is ONE string with 2–4 lines separated by \\n; '
+            "each line starts with '- Name: role/motive/relationship/status (15–40 words, not a one-word label)'."
+        )
+        user = (
+            f"Sparkles: {seed}\nSection: {beat_title} — {beat_hint}\nGenre persona: {genre_name} ({genre_hint})\n"
+            f"Prior summary:\n{(prior_summary or '')[:4000]}\n\n"
+            f"LOCKED setting:\n{setting}\n\nLOCKED key_events:\n{key_events}\n"
+        )
+        if locked_txt:
+            user += f"\nLOCKED NAMES (must all appear): {locked_txt}\n"
+    else:
+        system = (
+            "你只负责补全一个小节的「人物」字段。只输出 JSON："
+            '{"characters":"……"} 。characters 为单个字符串，内含 2～4 行，用 \\n 换行；'
+            "每行以「- 」开头，格式「姓名：身份/性格/动机/关系/本节状态」（每行 20～56 字，禁止只写两个字的短语）；"
+            "须与设定、核心事件一致，并体现题材人格「"
+            + genre_name
+            + "」的典型人物配置。"
+        )
+        user = (
+            f"创意种子：{seed}\n当前小节：{beat_title} — {beat_hint}\n题材人格：{genre_name}（{genre_hint}）\n"
+            f"已定前文摘要：\n{(prior_summary or '')[:4000]}\n\n"
+            f"【已定设定】\n{setting}\n\n【已定核心事件】\n{key_events}\n"
+        )
+        if locked_txt:
+            user += f"\n【锁定姓名（须全部出现）】{locked_txt}\n"
+    raw = complete_chat(cfg, system, user, temperature=0.58, max_tokens=1000)
+    data = _parse_json_content(raw)
+    ch = ""
+    if isinstance(data, dict):
+        ch = coerce_display_text(data.get("characters", ""))
+    if not typified_characters_meaningful(ch):
+        loose = _extract_typified_fields_loose(raw)
+        ch = str(loose.get("characters", "")).strip()
+    return ch.strip() if typified_characters_meaningful(ch) else ""
 
 
 def _functional_extract_variants(data: Dict[str, Any], raw: str) -> list:
@@ -664,7 +729,8 @@ def recommend_functional_roles(
             "你是叙事生产统筹。从下列「并行职能」中为当前小节挑选 4～6 个，"
             "须结合故事已发展到哪一阶段（开篇/发展/高潮）与已定前文，针对性补缺，而非固定套路。"
             "只输出 JSON：{\"roles\": [\"职能名\", ...]}，职能名必须与列表完全一致。"
-            "若已有前文须包含「连贯性校验师」。发展/高潮阶段或已有前文时，可酌情纳入「反套路创意师」（拼合后做突变润色，不并行生成片段）。"
+            "「连贯性校验师」不参与总体方案拼合，勿将其列入本请求的 roles。"
+            "发展/高潮阶段或已有前文时，可酌情纳入「反套路创意师」（拼合后做突变润色，不并行生成片段）。"
         )
         user = (
             f"标题：{story_title}\n创意种子：{seed}\n当前小节：{beat_title} — {beat_hint}\n"
@@ -736,8 +802,9 @@ def generate_typified_beat(
             "Prioritize story quality: concrete imagery, causal clarity, character voice, and emotional stakes. "
             "LENGTH BUDGET: setting + characters + key_events together under ~200 English words. "
             "setting: ONE line — time + place (~15–28 words). "
-            "characters: 2–4 lines, each starts with '- ', format 'Name: brief role/identity only (≤12 words, no biography)'. "
-            "key_events: exactly 5 lines, each starts with '- ', each 12–20 words, vivid and causal; no prose paragraphs. "
+            "characters: 2–4 lines, each starts with '- ', format "
+            "'Name: role, motive, relationship, and in-scene status (15–40 words; not a one-word label)'. "
+            "key_events: exactly 3 lines, each starts with '- ', each 12–20 words, vivid and causal; no prose paragraphs. "
             "If a canon list is given, reuse exact character names. "
             "CHARACTER CONTINUITY: If prior character profiles are given, the characters field MUST update them—"
             "keep every locked name unchanged; refresh motives, relationships, and in-scene status for this beat; "
@@ -787,14 +854,15 @@ def generate_typified_beat(
             "因果清晰、避免空泛套话与口号式描写。"
             "【篇幅】三字段中文总字数（不含空白）约 280～380 字；信息密度高但避免长篇散文。"
             "setting：仅一行，写清时间+地点（约 30～55 字）。"
-            "characters：2～4 行，每行以「- 」开头，格式「姓名：身份短语（≤12字，仅写身份/关系，禁止写动机从句与传记）」。"
-            "key_events：恰好 5 条，每行以「- 」开头，每条 18～32 字，写具体动作或转折，鼓励意外与画面感。"
+            "characters：2～4 行，每行以「- 」开头，格式「姓名：身份/性格/动机/关系/本节状态」（每行 20～56 字，须写完整句，禁止只写两个字的短语如「浪漫牵线人」）。"
+            "key_events：恰好 3 条，每行以「- 」开头，每条 18～32 字，写具体动作或转折，鼓励意外与画面感。"
+            "【硬性】characters 与 key_events 均不得为空、不得只输出「—」或单个减号；若信息不足须合理补全。"
             "【题材差异化硬性要求】你只代表当前题材人格「"
             + genre_name
             + "」：setting 与 characters 必须写出该题材独有的母题、场景类型、人物身份与矛盾抓手，"
             "与并行输出的其它题材版本在「地点/空间」「叙事视角」「人物配置」上必须拉开显著差距，"
             "禁止与其它题材共用同一段落式模板或仅替换同义词。"
-            "key_events 必须恰好 5 条；每一行必须以「- 」开头且单独承载一条完整事件或转折；"
+            "key_events 必须恰好 3 条；每一行必须以「- 」开头且单独承载一条完整事件或转折；"
             "禁止在一行内用多个「-」串联；禁止只输出一个「-」或空字符串；每条信息具体。若提供设定清单，人物姓名须与清单完全一致。"
             "【连续性】若下方提供「已定前文」，本节必须在其人物状态、时间线与因果链上自然递进，禁止无视前文后果或擅自重置故事。"
             "【人物承接】若提供「已定人物档案」，characters 须在其基础上更新：所有已锁定姓名必须保留且不得改名；"
@@ -859,7 +927,23 @@ def generate_typified_beat(
         )
         if bf:
             data["key_events"] = bf
-    if not (data.get("characters") or "").strip() and (data.get("setting") or "").strip():
+    if not typified_characters_meaningful(data.get("characters")):
+        ch_bf = _backfill_typified_characters(
+            cfg,
+            setting=str(data.get("setting", "")),
+            key_events=str(data.get("key_events", "")),
+            seed=seed,
+            beat_title=beat_title,
+            beat_hint=beat_hint,
+            genre_name=genre_name,
+            genre_hint=genre_hint,
+            prior_summary=prior_summary or "",
+            locked_names=locked,
+            lang=lang,
+        )
+        if ch_bf:
+            data["characters"] = ch_bf
+    if not typified_characters_meaningful(data.get("characters")) and (data.get("setting") or "").strip():
         data["characters"] = "- （待补全人物）"
     return data
 
@@ -925,19 +1009,14 @@ def _coerce_antitrope_variants(
     plan_count: int,
 ) -> List[Dict[str, Any]]:
     """反套路全文大纲：不做职能分块规范化，仅清洗 JSON 泄漏。"""
-    from display_utils import repair_antitrope_outline, strip_trailing_json_leak, unescape_display_text
+    from narrativeloom.utils.display_utils import normalize_mutation_marker_aliases, repair_antitrope_outline, strip_trailing_json_leak, unescape_display_text
 
     expanded: List[Dict[str, Any]] = []
     for item in variants:
         txt, pf = _normalize_unified_plan_item(item)
         txt = repair_antitrope_outline(strip_trailing_json_leak(unescape_display_text(txt))).strip()
         if txt:
-            txt = re.sub(
-                r"(?<![\u4e00-\u9fffA-Za-z])\\?/?mut\s*$",
-                "",
-                txt,
-                flags=re.I | re.M,
-            ).strip()
+            txt = normalize_mutation_marker_aliases(txt).strip()
             expanded.append({"outline": txt, "process_feedback": pf})
         else:
             expanded.append({"outline": "", "process_feedback": pf})
@@ -992,15 +1071,17 @@ _UNIFIED_FN_TONE_ZH = (
 )
 
 _UNIFIED_FN_BULLET_FORMAT_ZH = (
-    "【分条格式】剧情逻辑师、冲突设计师：每个因果步骤、矛盾类型、阻碍、悬念、关键突变须各占独立一行"
-    "（以「- 」开头）；禁止用分号把「核心矛盾」「阻碍」「戏剧冲突」「因果链」「关键突变」挤在同一行。"
+    "【分条格式】剧情逻辑师：因果链、关键突变各占独立一行（以「- 」开头）；"
+    "冲突设计师：仅写核心矛盾、戏剧冲突、悬念（禁止输出「阻碍」「障碍」「角色阻碍」栏）；"
+    "禁止用分号把多条挤在同一行。"
 )
 
 _UNIFIED_FN_LENGTH_ZH = (
     "【篇幅控制·易读】设定/剧情/冲突/细节等职能以 2–4 条 bullet 为宜，每条≤32 字；"
     "设定构建师仅写地点/时间/场景/规则四项；剧情逻辑师≤4 条；冲突设计师≤4 条。"
-    "【人物塑造师】每人一行须写完整身份/性格/动机/当前状态（≤56 字，禁止半句截断）；"
-    "人物姓名须完整书写（如「阿依古丽」），禁止在姓名中间插入冒号。"
+    "【人物塑造师】每人一行须写身份/性格/关系（≤40 字，自然短句，禁止半句截断）；"
+    "禁止「动机是」「关系是」「本节状态」等标签；禁止单独写本节状态句。"
+    "人物姓名须完整（如「阿依古丽」「艾买提」），禁止误截为「古丽」「艾买」等短名；禁止姓名中间插入冒号。"
 )
 
 _UNIFIED_FN_BREVITY_ZH = (
@@ -1044,6 +1125,7 @@ def generate_unified_functional_plans(
 ) -> Dict[str, Any]:
     """一次统筹全部职能，返回 plan_count 个完整小节总体方案（含【职能】分块）。"""
     cfg = _cfg_or_env(llm_cfg)
+    roles = [(n, t) for n, t in roles if not is_unified_plan_excluded_role(n, lang)]
     locked = [n.strip() for n in (locked_character_names or []) if (n or "").strip()]
     role_names = [n for n, _ in roles]
     roles_block = "\n".join(f"- {n}：{t}" for n, t in roles)
@@ -1121,9 +1203,13 @@ def generate_unified_functional_plans(
             f"{_UNIFIED_FN_LENGTH_ZH}"
             + (_UNIFIED_FN_BREVITY_ZH if beat_index > 0 else "")
             + "【篇幅】各职能分块精炼可读，禁止用省略号截断；"
-            "人物塑造师每行须写清身份/性格/动机/当前状态（承接前文），禁止占位句。"
-            f"【人物塑造师】分块仅写真实人物姓名，每行「角色名：身份/动机/状态」；"
-            f"恰好 {sculpt_target} 人（不多不少），每人必须有具体身份/性格/动机；"
+            "人物塑造师每行用自然短句写清身份、性格与关系（承接前文），禁止占位句。"
+            "【冲突设计师】只写核心矛盾、戏剧冲突、悬念三类 bullet，禁止「阻碍/障碍」栏。"
+            "【人物塑造师】禁止使用「动机是」「关系是」「本节状态」等标签；禁止单独写本节状态句；"
+            "每行≤40字；同一姓名不得拆成「阿依古丽」与「古丽」两条。"
+            "【姓名完整性】须使用设定清单与前文中的完整人名，禁止截断（如「艾买提」不得写成「艾买」，「阿依古丽」不得写成「古丽」）。"
+            f"【人物塑造师】分块仅写真实人物姓名，每行「角色名：……」；"
+            f"恰好 {sculpt_target} 人（不多不少），缺一人则视为不合格；"
             "禁止写「性格与动机待展开」「本小节出场人物」「任务」「张力点」「核心矛盾」等非人名条目；"
             "禁止把动词片段、形容词片段当人名（如「韩星收」「韩星的」「阿米尔对宝」「严谨务」应分别规整为「韩星」「阿米尔」或丢弃）；"
             f"剧情逻辑师、氛围渲染师、冲突设计师等其它分块只能使用人物塑造师已列出的姓名，禁止新增未列出人物。"
@@ -1208,6 +1294,21 @@ def generate_unified_functional_plans(
     return {"_mode": "unified", "variants": coerced}
 
 
+_ANTITROPE_ANGLES_ZH = (
+    "【三版差异化硬性要求】禁止三版仅换词或只改一处：\n"
+    "方案A：颠覆读者对因果/真相的预期（我以为X，其实Y）\n"
+    "方案B：核心角色动机反转（表面目标≠真实欲望，关系重组）\n"
+    "方案C：类型/氛围错位（严肃变荒诞、浪漫变冷峻、悬疑变日常等）\n"
+    "每版至少 8 处 ⟦mut⟧ 标记，分布在小节与职能分块中；标记内容不得与其它版重复。"
+)
+
+_ANTITROPE_ANGLES_EN = (
+    "Three variants MUST use distinct anti-cliché strategies: "
+    "A subverts expected causality; B flips character motives; C mismatches genre/tone. "
+    "At least 8 mutation markers per variant; no duplicated mutation patterns across variants."
+)
+
+
 def generate_antitrope_full_story(
     *,
     full_outline: str,
@@ -1231,28 +1332,31 @@ def generate_antitrope_full_story(
             f"Wrap ONLY newly changed phrases in {_MUT_OPEN}...{_MUT_CLOSE} markers. "
             "At least 5 distinct mutations per variant across sections; mutate motives, conflict, imagery, tone. "
             "Do NOT emit bare /mut or \\mut literals. "
-            "Preserve continuity; mutate clichés. Three angles must differ."
+            f"{_ANTITROPE_ANGLES_EN}"
         )
         user = f"Sparkles: {seed}\n\nFULL OUTLINE:\n{base[:12000]}\n"
     else:
         system = (
             "你是反套路创意师。只输出 JSON。"
             f"返回 {variant_count} 个 variant，每个 variant.outline 为完整多小节大纲替换稿，"
-            "保留原有小节/分块结构；仅对突变处用 "
+            "保留原有小节/分块结构；须完整保留输入中的 ### **小节 n** 标题行（不得删除或合并）；"
+            "仅对突变处用 "
             f"{_MUT_OPEN}…{_MUT_CLOSE} 包裹（未改处不要标记）。"
             f"每版至少 5 处突变，须分布在不同小节或职能分块；"
             "突变须触及人物动机、冲突走向、细节意象、对话语气或场景氛围，勿只改一词。"
             "三版突变角度须明显不同，保持整体因果连贯。"
+            f"{_ANTITROPE_ANGLES_ZH}"
             "outline 必须是中文【职能名】分块正文（如【人物塑造师】），"
             "禁止用 English key 的 JSON 对象（如 character_builder、plot_logician）代替正文。"
-            f"禁止输出裸露的 /mut、\\mut、mut 字面量；只使用 {_MUT_OPEN}…{_MUT_CLOSE} 成对标记。"
+            f"禁止输出 <<<、>>>、<<mut>> 等角括号标记；禁止输出裸露的 /mut、\\mut、mut 字面量；"
+            f"只使用 {_MUT_OPEN}…{_MUT_CLOSE} 成对标记。"
             f"职能说明：{task}"
         )
         user = f"创意种子：{seed}\n\n【全部小节汇编大纲】\n{base[:12000]}\n"
     if canon_sheet:
         user += f"\n【设定清单】\n{canon_sheet[:2500]}\n"
-    user += f"\n请输出 {variant_count} 个反套路升级大纲。"
-    raw = complete_chat(cfg, system, user, temperature=0.92, max_tokens=6000)
+    user += f"\n请输出 {variant_count} 个反套路升级大纲；三版须按上述 A/B/C 策略显著分化。"
+    raw = complete_chat(cfg, system, user, temperature=0.96, max_tokens=8000)
     data = _parse_json_content(raw)
     variants = _functional_extract_variants(data, raw) if isinstance(data, dict) else []
     loose_outlines = _extract_fragment_strings_loose(raw)
@@ -1388,7 +1492,7 @@ def generate_functional_variants(
             "必须返回 {\"variants\": [ {...}, {...}, {...} ]}，恰好三个对象。"
             "每个 variant 的 fragment 只能是「简要概述要点」，禁止写成叙事散文或完整故事。"
             + (
-                f"fragment 格式：恰好 {sculpt_target} 行，每行「- 角色名：该角色的人物设定（性格/动机/关系/状态）」；"
+                f"fragment 格式：恰好 {sculpt_target} 行，每行「- 角色名：身份/性格/关系与行动（自然叙述，禁止「动机是」「关系是」「本节状态」）」；"
                 "禁止物理提醒、空间拓展、承接前文、核查、连续性说明等元叙事标签行。"
                 if sculpt and sculpt_target is not None
                 else "fragment 格式：2～5 行短句，每行必须以「- 」开头；每行不超过 90 字；"
@@ -1403,6 +1507,7 @@ def generate_functional_variants(
             + "禁止把整段 JSON（含 variants 数组）塞进单个 fragment；每个 variant.fragment 只能是纯文本要点。"
             + (
                 "【人物塑造师】三份 variant 的人物姓名、性格类型、关系结构必须显著差异化，"
+                "须使用完整人名（如「艾买提」不得写成「艾买」），"
                 "禁止三版同质化或仅替换同义词；开篇小节三版须尽量使用不同人物阵容与性格对比。"
                 if sculpt
                 else ""
@@ -1929,10 +2034,13 @@ def expand_prose(
     bc = (beats_combined or "").strip()
     if lang == "en":
         system = (
-            "You are a fiction writer. Expand the beat compilation into a rich continuous narrative; keep names consistent. "
-            "Use multiple paragraphs with scene work, interiority where fitting, and clear transitions. "
-            "Prefer fresh, specific imagery and believable surprises that still fit the outline. "
-            "Aim for roughly 1400–2600 words unless the compilation is very short. "
+            "You are an accomplished literary fiction writer. Expand the beat compilation into "
+            "publishable literary prose with genuine style: vary sentence rhythm (lyrical long lines "
+            "against sharp short beats); use concrete sensory detail, metaphor, synesthesia, and "
+            "subtext in dialogue; allow brief interior monologue and controlled lyricism. "
+            "Avoid reportage, clichés, and flat subject-verb-object chains. "
+            "Honor the outline's causality while letting scenes breathe with atmosphere and tension. "
+            "Aim for roughly 2200–4200 words unless the compilation is very short (then at least 3×). "
             "Output ONE JSON object ONLY, no markdown fences, keys exactly: "
             '{"title":"Short literary title for the whole piece, 4–12 words, no section numbers","prose":"..."} . '
             "The prose MUST NOT use Markdown '#' headings, section numbering, or meta labels like 'Opening'; "
@@ -1947,9 +2055,13 @@ def expand_prose(
         user += f"Beat compilation:\n{bc}\n\nReturn JSON with title and prose."
     else:
         system = (
-            "你是中文小说作者。根据小节汇编扩写为连贯、饱满的长叙事：多段落、场景描写充实、人物动作与心理穿插、转场自然。"
-            "在尊重汇编走向的前提下，鼓励新颖意象、可信的小意外与细腻感官描写，避免套路化套话。"
-            "总篇幅目标约 1800～3200 字（若汇编极短可适当缩短但仍须明显长于汇编原文）。"
+            "你是资深中文文学小说作者。根据小节汇编扩写为具有文学质感的长叙事："
+            "句式长短错落，适当运用比喻、通感、象征与留白；"
+            "环境描写服务情绪与主题，动作与心理交织，对话须有潜台词与人物口吻，"
+            "禁止通篇「谁做了什么」的主谓宾流水账、公文腔与网络套话。"
+            "在严守汇编因果与人物称谓的前提下，让场景有呼吸感与张力，意象要具体可感，"
+            "可适度运用诗性语句，但避免堆砌辞藻或空洞抒情。"
+            "总篇幅目标约 2800～4800 字；若汇编较短，正文也须明显长于汇编（至少三倍字数）。"
             "严格遵守人物称谓与设定清单。"
             "【输出格式】只输出一个 JSON 对象，不要 Markdown 代码围栏；键名固定为："
             '{"title":"……","prose":"……"} 。'
@@ -1958,6 +2070,7 @@ def expand_prose(
             "禁止以小节编号或「小节1」「#开端」等作为开头；正文从第一段叙事直接起笔。"
             "【JSON 硬性】prose 必须是单个 JSON 字符串；段落之间用 \\n\\n，禁止用 \";\" 拼接多个引号字符串；"
             "正文内的英文双引号须转义为 \\\"。"
+            "若模型未输出换行，也须在场景切换、对话前后、时间跳跃处主动分段。"
         )
         user = f"创意种子：{seed}\n\n"
         if canon_sheet:
@@ -1965,7 +2078,7 @@ def expand_prose(
         if rag_excerpt:
             user += f"【前文摘录】\n{rag_excerpt}\n\n"
         user += f"小节汇编：\n{bc}\n\n请输出上述 JSON。"
-    raw = (complete_chat(cfg, system, user, temperature=0.72, max_tokens=16000, retry_attempts=8, retry_pause=3.0) or "").strip()
+    raw = (complete_chat(cfg, system, user, temperature=0.82, max_tokens=20000, retry_attempts=8, retry_pause=3.0) or "").strip()
     title, prose = _repair_expand_prose_raw(raw)
     if not prose:
         data = _parse_json_content(raw)
@@ -1974,12 +2087,13 @@ def expand_prose(
             prose = str(data.get("prose") or data.get("body") or data.get("text") or data.get("content") or "").strip()
     if prose:
         prose = scrub_expanded_prose_artifacts(prose)
+        prose = format_prose_paragraphs(prose)
         if prose.lstrip().startswith("{") and '"prose"' in prose[:120]:
             _, prose2 = _repair_expand_prose_raw(prose)
             if prose2:
-                prose = scrub_expanded_prose_artifacts(prose2)
+                prose = format_prose_paragraphs(scrub_expanded_prose_artifacts(prose2))
     else:
-        prose = scrub_expanded_prose_artifacts(raw)
+        prose = format_prose_paragraphs(scrub_expanded_prose_artifacts(raw))
     if title:
         title = re.sub(r'[#"\'「」]', "", title).strip()[:48]
     return title, prose

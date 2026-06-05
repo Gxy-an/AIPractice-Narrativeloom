@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import os
 
+from narrativeloom.config.settings import PROJECT_ROOT
+
 _SECRET_KEYS = (
     "MIMO_API_KEY",
     "OPENAI_API_KEY",
@@ -17,7 +19,7 @@ _SECRET_KEYS = (
 def bootstrap_env() -> None:
     from dotenv import load_dotenv
 
-    load_dotenv()
+    load_dotenv(PROJECT_ROOT / ".env")
     try:
         import streamlit as st
     except Exception:

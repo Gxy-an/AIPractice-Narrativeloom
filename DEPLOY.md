@@ -6,15 +6,15 @@
 
 ### 1. 推送代码到 GitHub
 
-确保仓库 `https://github.com/Gxy-an/AIPractice-Narrativeloom` 已包含最新代码（`app.py`、`requirements.txt` 等）。
+确保仓库 `https://github.com/Gxy-an/AIPractice-Narrativeloom` 已包含最新代码（`app.py`、`requirements.txt`、`narrativeloom/` 等）。
 
 ### 2. 登录并创建应用
 
-1. 打开 [share.streamlit.io](https://share.streamlit.io/)，用 GitHub 登录  
-2. 点击 **New app**  
-3. 选择仓库 `Gxy-an/AIPractice-Narrativeloom`  
-4. **Main file path** 填：`app.py`  
-5. **Branch** 选：`main`  
+1. 打开 [share.streamlit.io](https://share.streamlit.io/)，用 GitHub 登录
+2. 点击 **New app**
+3. 选择仓库 `Gxy-an/AIPractice-Narrativeloom`
+4. **Main file path** 填：`app.py`
+5. **Branch** 选：`main`
 
 ### 3. 配置 Secrets（API 密钥）
 
@@ -27,12 +27,15 @@ OPENAI_BASE_URL = "https://api.xiaomimimo.com/v1"
 LLM_MODEL = "mimo-v2-flash"
 ```
 
-也可参考仓库内 `.streamlit/secrets.toml.example`。
+也可参考仓库内 `.streamlit/secrets.toml.example`。`app.py` 启动时会通过 `narrativeloom/config/env_bootstrap.py` 将 Secrets 注入环境变量。
 
 ### 4. 部署
 
-保存后 Cloud 会自动构建并给出公网 URL，形如：  
+保存后 Cloud 会自动构建并给出公网 URL，形如：
+
 `https://aipractice-narrativeloom-xxxx.streamlit.app`
+
+参与者只需在浏览器打开该链接，无需安装 Git 或 Python。
 
 ---
 
@@ -63,6 +66,6 @@ streamlit run app.py --server.port=$PORT --server.address=0.0.0.0
 
 ## 注意事项
 
-- **切勿**将 `.env` 或 `.streamlit/secrets.toml` 提交到 Git  
-- 云端无持久磁盘时，草稿 JSON 可能在重启后丢失；正式使用可考虑挂载存储或数据库  
+- **切勿**将 `.env` 或 `.streamlit/secrets.toml` 提交到 Git
+- 云端无持久磁盘时，草稿 JSON 可能在重启后丢失；正式使用可考虑挂载存储或数据库
 - 若构建超时，可在 `requirements.txt` 中去掉未使用的依赖以加快安装

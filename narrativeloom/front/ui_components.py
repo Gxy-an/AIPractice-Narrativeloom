@@ -10,16 +10,16 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import streamlit as st
 
-from display_utils import (
+from narrativeloom.utils.display_utils import (
     bullet_text_to_markdown,
     filter_character_sculptor_fragment,
     format_typified_brief,
     fragment_to_markdown_bullets,
     parse_merge_role_sections,
 )
-from personas import is_character_sculptor_role
-from i18n import T
-from ui_design import PageMode, get_global_css
+from narrativeloom.domain.personas import is_character_sculptor_role
+from narrativeloom.config.i18n import T
+from narrativeloom.front.ui_design import PageMode, get_global_css
 
 CARDS_PER_PAGE = 2
 UNIFIED_PLANS_PER_PAGE = 2
@@ -224,9 +224,15 @@ def render_beat_rail_html(n: int, current: int, done_mask: List[bool]) -> str:
 
 
 def render_prose_block(prose: str) -> None:
-    esc = html.escape(prose).replace("\n", "<br/>")
+    from narrativeloom.utils.display_utils import format_prose_paragraphs
+
+    formatted = format_prose_paragraphs(prose or "")
+    parts = [p.strip() for p in formatted.split("\n\n") if p.strip()]
+    if not parts:
+        parts = [(prose or "").strip()]
+    body = "".join(f'<p class="nl-prose-p">{html.escape(p)}</p>' for p in parts)
     st.markdown(
-        f'<article class="nl-prose-full">{esc}</article>',
+        f'<article class="nl-prose-full">{body}</article>',
         unsafe_allow_html=True,
     )
 
@@ -496,8 +502,8 @@ def _fragment_to_ul_html(fragment: str) -> str:
 
 
 def _variant_fragment_at(variants: List[Dict[str, Any]], index: int) -> str:
-    from display_utils import muffle_markdown_heading_lines
-    from llm_client import functional_slot_bundle_from_pack
+    from narrativeloom.utils.display_utils import muffle_markdown_heading_lines
+    from narrativeloom.service.llm_client import functional_slot_bundle_from_pack
 
     if index < 0 or not variants:
         return ""
@@ -506,7 +512,7 @@ def _variant_fragment_at(variants: List[Dict[str, Any]], index: int) -> str:
 
 
 def _variants_have_content(variants: List[Dict[str, Any]]) -> bool:
-    from llm_client import _looks_like_wrapped_variants_json, functional_fragment_display
+    from narrativeloom.service.llm_client import _looks_like_wrapped_variants_json, functional_fragment_display
 
     for v in variants or []:
         if isinstance(v, dict):
@@ -661,9 +667,10 @@ def render_unified_plan_carousel(
     renormalize_on_render: bool = False,
     cards_per_page: int = UNIFIED_PLANS_PER_PAGE,
     show_section_heading: bool = True,
+    mutation_baseline: str = "",
 ) -> int:
     """功能化/反套路总体方案：横向翻页展示候选。"""
-    from display_utils import normalize_single_unified_outline, outline_to_display_html
+    from narrativeloom.utils.display_utils import normalize_single_unified_outline, outline_to_display_html
 
     per_page = max(1, int(cards_per_page))
     labels = plan_labels or [T("plan_a", lg), T("plan_b", lg), T("plan_c", lg), T("plan_d", lg)]
@@ -743,6 +750,7 @@ def render_unified_plan_carousel(
                 highlight_mutations=highlight_mutations,
                 role_names=role_names if role_layout else None,
                 outline_kind="roles" if role_layout else "story",
+                mutation_baseline=mutation_baseline if highlight_mutations else "",
             )
             st.markdown(
                 f'<div class="nl-fn-module nl-unified-plan{plan_cls}{picked_cls}">'

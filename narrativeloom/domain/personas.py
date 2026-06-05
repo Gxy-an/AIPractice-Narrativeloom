@@ -142,6 +142,8 @@ CHARACTER_SCULPTOR_ZH = "人物塑造师"
 CHARACTER_SCULPTOR_EN = "Character Sculptor"
 SETTING_ARCHITECT_ZH = "设定构建师"
 SETTING_ARCHITECT_EN = "Setting Architect"
+CONTINUITY_CHECKER_ZH = "连贯性校验师"
+CONTINUITY_CHECKER_EN = "Continuity Checker"
 
 # 功能化人格（中 / 英）— 并行片段生成（8 职能）
 FUNCTIONAL_PARALLEL_ZH: List[Tuple[str, str]] = [
@@ -152,9 +154,9 @@ FUNCTIONAL_PARALLEL_ZH: List[Tuple[str, str]] = [
     (
         CHARACTER_SCULPTOR_ZH,
         "这位助理专注刻画角色的性格特质、核心动机、人物关系与行为逻辑；"
-        "输出必须写出具体人物姓名（至少两名），格式为「姓名：身份/动机/关系」，禁止无姓名的泛称堆砌；"
-        "禁止写入世界规则、物理提醒、空间拓展、承接前文、核查、高潮点、高潮节点等非人物条目；"
-        "每行仅「角色名：该角色性格/动机/关系/状态」一种格式。",
+        "输出必须写出具体人物姓名（至少两名），格式为「姓名：身份、性格、与他人关系及本章行动驱动」的自然叙述；"
+        "禁止使用「动机是」「关系是」「本节状态」等标签式用语，禁止单独写本节状态句；"
+        "禁止无姓名的泛称堆砌；禁止写入世界规则、物理提醒、空间拓展、承接前文、核查等非人物条目。",
     ),
     (
         "剧情逻辑师",
@@ -174,7 +176,7 @@ FUNCTIONAL_PARALLEL_ZH: List[Tuple[str, str]] = [
     ),
     (
         "冲突设计师",
-        "这位助理专注设计故事的核心矛盾、角色阻碍与戏剧冲突，制造情节起伏与高潮节点，让故事充满张力，解决剧情平淡无起伏的问题，推动叙事走向高潮。",
+        "这位助理专注设计故事的核心矛盾与戏剧冲突、悬念升级，制造情节起伏与高潮节点，让故事充满张力，解决剧情平淡无起伏的问题，推动叙事走向高潮。",
     ),
     (
         "连贯性校验师",
@@ -210,7 +212,7 @@ FUNCTIONAL_PARALLEL_EN: List[Tuple[str, str]] = [
     ),
     (
         "Conflict Designer",
-        "Engineers core tensions, obstacles, and dramatic peaks.",
+        "Engineers core tensions, dramatic peaks, and suspense beats (no separate obstacle column).",
     ),
     (
         "Continuity Checker",
@@ -256,6 +258,29 @@ def antitrope_role_task(lang: str) -> str:
 
 def is_antitrope_role(name: str, lang: str) -> bool:
     return name == antitrope_role_name(lang)
+
+
+def is_continuity_checker_role(name: str, lang: str) -> bool:
+    zh = (lang or "zh") == "zh"
+    return name == (CONTINUITY_CHECKER_ZH if zh else CONTINUITY_CHECKER_EN)
+
+
+def is_unified_plan_excluded_role(name: str, lang: str) -> bool:
+    """不参与「总体方案」拼合展示的职能（反套路、连贯性校验）。"""
+    return is_antitrope_role(name, lang) or is_continuity_checker_role(name, lang)
+
+
+def filter_unified_plan_role_names(names: List[str], lang: str) -> List[str]:
+    return [n for n in names if n and not is_unified_plan_excluded_role(n, lang)]
+
+
+def get_functional_unified_plan_personas(lang: str) -> List[Tuple[str, str]]:
+    """参与总体方案统筹的职能（不含反套路、连贯性校验师）。"""
+    return [
+        (n, t)
+        for n, t in get_functional_parallel_personas(lang)
+        if not is_unified_plan_excluded_role(n, lang)
+    ]
 
 
 def is_character_sculptor_role(name: str, lang: str) -> bool:

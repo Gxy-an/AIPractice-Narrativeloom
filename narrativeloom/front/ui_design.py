@@ -537,11 +537,19 @@ div.nl-fn-nav-instack-anchor + div[data-testid="stHorizontalBlock"] > div:last-c
 }}
 
 .nl-mut-highlight {{
-    background: linear-gradient(120deg, #FFF0F3 0%, #EEF2FF 100%);
-    color: #7A3E4A;
-    padding: 0.05em 0.25em;
-    border-radius: 4px;
+    background: linear-gradient(120deg, #FFE0EA 0%, #FFD1E3 45%, #E6E4FF 100%);
+    color: #8B1E3F;
+    padding: 0.12em 0.38em;
+    border-radius: 5px;
     font-weight: 600;
+    box-shadow: 0 0 0 1px rgba(255, 105, 140, 0.42);
+}}
+.nl-mut-li {{
+    background: linear-gradient(90deg, rgba(255, 224, 234, 0.55) 0%, rgba(255, 255, 255, 0) 100%);
+    border-left: 3px solid #FF6B9A;
+    padding-left: 0.45rem;
+    margin-left: -0.45rem;
+    border-radius: 4px;
 }}
 .nl-outline-pre {{
     white-space: pre-wrap;
@@ -569,6 +577,12 @@ div.nl-fn-nav-instack-anchor + div[data-testid="stHorizontalBlock"] > div:last-c
     padding: 1.25rem 1.4rem;
     line-height: 1.8;
     font-family: var(--nl-serif);
+}}
+.nl-prose-p {{
+    margin: 0 0 1em 0;
+}}
+.nl-prose-p:last-child {{
+    margin-bottom: 0;
 }}
 .nl-beat-pill {{
     min-width: 2rem;

@@ -4,11 +4,10 @@
 from __future__ import annotations
 
 import csv
-import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-LOG_PATH = os.path.join(os.path.dirname(__file__), "data", "experiment_log.csv")
+from narrativeloom.config.settings import LOG_PATH
 
 COLUMNS = [
     "timestamp",
@@ -30,9 +29,9 @@ COLUMNS = [
 
 
 def _ensure_file() -> None:
-    os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
-    if not os.path.exists(LOG_PATH):
-        with open(LOG_PATH, "w", newline="", encoding="utf-8-sig") as f:
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if not LOG_PATH.exists():
+        with LOG_PATH.open("w", newline="", encoding="utf-8-sig") as f:
             w = csv.DictWriter(f, fieldnames=COLUMNS)
             w.writeheader()
 
@@ -42,9 +41,9 @@ def append_row(row: Dict[str, Any]) -> str:
     row = {k: row.get(k, "") for k in COLUMNS}
     if not row.get("timestamp"):
         row["timestamp"] = datetime.now().isoformat(timespec="seconds")
-    with open(LOG_PATH, "a", newline="", encoding="utf-8-sig") as f:
+    with LOG_PATH.open("a", newline="", encoding="utf-8-sig") as f:
         csv.DictWriter(f, fieldnames=COLUMNS).writerow(row)
-    return LOG_PATH
+    return str(LOG_PATH)
 
 
 def log_session_summary(
@@ -102,4 +101,4 @@ def log_session_summary(
             }
         )
     )
-    return LOG_PATH
+    return str(LOG_PATH)

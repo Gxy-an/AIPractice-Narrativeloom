@@ -10,7 +10,9 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 from dotenv import load_dotenv
 
-load_dotenv()
+from narrativeloom.config.settings import PROJECT_ROOT
+
+load_dotenv(PROJECT_ROOT / ".env")
 
 # 连通性检测：快速失败，避免登录长时间卡住
 _VERIFY_TIMEOUT = httpx.Timeout(connect=12.0, read=22.0, write=15.0, pool=8.0)
