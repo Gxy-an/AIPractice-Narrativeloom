@@ -1,3 +1,5 @@
+<!-- 界面展示以 narrativeloom/config/consent_content.py 为准；本文件供存档参考。 -->
+
 # 人机协同叙事创作实验知情同意书
 ## 一、研究基本信息
 

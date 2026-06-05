@@ -399,6 +399,10 @@ div.nl-landing-lang-anchor + div[data-testid="stSelectbox"] label {{
     line-height: 1.48;
     color: var(--nl-body);
 }}
+.nl-consent-scroll .nl-fn-module-body {{
+    max-height: none;
+    overflow: visible;
+}}
 .nl-typ-as-fn .nl-fn-module-body,
 .nl-typ-as-fn .nl-typ-fn-body {{
     max-height: 15.75rem;
@@ -659,6 +663,164 @@ section.main div[data-testid="stTextArea"] textarea {{
 }}
 button[role="switch"][aria-checked="true"] {{
     background: {t['blue']} !important;
+}}
+
+/* —— 知情同意页 —— */
+.nl-consent-page {{
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 0 0.5rem 2rem;
+}}
+.nl-consent-steps {{
+    display: flex;
+    justify-content: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    margin: 0.5rem 0 1.25rem;
+}}
+.nl-consent-step {{
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 0.28rem 0.72rem;
+    border-radius: 999px;
+    border: 1px solid var(--nl-border);
+    color: var(--nl-muted);
+    background: rgba(255,255,255,0.72);
+}}
+.nl-consent-step.is-active {{
+    background: var(--nl-gradient);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 2px 8px rgba(101,127,236,0.22);
+}}
+.nl-consent-hero {{
+    text-align: center;
+    padding: 1.5rem 0.5rem 0.75rem;
+}}
+.nl-consent-hero h1 {{
+    font-family: var(--nl-serif);
+    font-size: clamp(1.45rem, 3.5vw, 1.85rem);
+    font-weight: 700;
+    color: var(--nl-text);
+    margin: 0 0 0.45rem;
+    line-height: 1.35;
+}}
+.nl-consent-hero p {{
+    font-size: 0.9rem;
+    color: var(--nl-muted);
+    margin: 0;
+    line-height: 1.55;
+}}
+.nl-consent-chips {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    justify-content: center;
+    margin: 0.85rem 0 1.1rem;
+}}
+.nl-consent-chip {{
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--nl-text);
+    padding: 0.32rem 0.78rem;
+    border-radius: 999px;
+    border: 1px solid var(--nl-border);
+    background: linear-gradient(135deg, #EEF2FF 0%, #FDF4F5 100%);
+}}
+.nl-consent-scroll {{
+    max-height: min(46vh, 440px);
+    overflow-y: auto;
+    padding-right: 0.35rem;
+    margin-bottom: 1rem;
+}}
+.nl-consent-scroll::-webkit-scrollbar {{ width: 6px; }}
+.nl-consent-scroll::-webkit-scrollbar-thumb {{
+    background: #C8D4F0;
+    border-radius: 999px;
+}}
+.nl-consent-kv {{
+    display: grid;
+    grid-template-columns: minmax(5.5rem, 7rem) 1fr;
+    gap: 0.35rem 0.75rem;
+    margin: 0;
+    font-size: 0.86rem;
+    line-height: 1.5;
+}}
+.nl-consent-kv dt {{
+    margin: 0;
+    font-weight: 600;
+    color: var(--nl-primary);
+}}
+.nl-consent-kv dd {{
+    margin: 0;
+    color: var(--nl-body);
+}}
+.nl-consent-steps-list {{
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}}
+.nl-consent-steps-list li {{
+    display: flex;
+    gap: 0.65rem;
+    margin-bottom: 0.65rem;
+    align-items: flex-start;
+}}
+.nl-consent-step-num {{
+    flex-shrink: 0;
+    width: 1.45rem;
+    height: 1.45rem;
+    border-radius: 50%;
+    background: var(--nl-gradient);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0.05rem;
+}}
+.nl-consent-step-body strong {{
+    display: block;
+    color: var(--nl-text);
+    font-size: 0.88rem;
+    margin-bottom: 0.12rem;
+}}
+.nl-consent-step-body span {{
+    font-size: 0.78rem;
+    color: var(--nl-muted);
+}}
+.nl-consent-step-body p {{
+    margin: 0.15rem 0 0;
+    font-size: 0.84rem;
+    line-height: 1.48;
+    color: var(--nl-body);
+}}
+.nl-consent-agree {{
+    background: var(--nl-surface);
+    border: 1px solid var(--nl-border);
+    border-radius: {t['radius_lg']};
+    box-shadow: var(--nl-shadow);
+    padding: 1rem 1.1rem 0.65rem;
+    margin-bottom: 0.85rem;
+}}
+.nl-consent-agree-head {{
+    font-family: var(--nl-serif);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--nl-text);
+    margin: 0 0 0.25rem;
+}}
+.nl-consent-agree-sub {{
+    font-size: 0.82rem;
+    color: var(--nl-muted);
+    margin: 0 0 0.65rem;
+    line-height: 1.45;
+}}
+div[data-testid="stVerticalBlock"]:has(.nl-consent-agree) div[data-testid="stCheckbox"] label span {{
+    font-size: 0.86rem !important;
+    line-height: 1.45 !important;
+    color: var(--nl-body) !important;
 }}
 </style>
 """
