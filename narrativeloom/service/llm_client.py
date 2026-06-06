@@ -37,6 +37,7 @@ from narrativeloom.domain.personas import (
     is_continuity_checker_role,
     is_unified_plan_excluded_role,
 )
+from narrativeloom.domain.character_names import extract_seed_cast_names, merge_unique_names
 
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -830,10 +831,14 @@ def generate_typified_beat(
     prior_characters_block: str = "",
     beat_index: int = 0,
     num_sections: int = 6,
+    character_target_total: Optional[int] = None,
 ) -> Dict[str, Any]:
     cfg = _cfg_or_env(llm_cfg)
     locked = [n.strip() for n in (locked_character_names or []) if (n or "").strip()]
     locked_txt = "、".join(locked) if locked else ""
+    char_target = max(2, int(character_target_total or max(2, len(locked))))
+    char_spec_en = f"exactly {char_target} lines"
+    char_spec_zh = f"恰好 {char_target} 行"
     ke_min, ke_max = _arc_key_events_range(beat_index, num_sections)
     arc_phase = _story_arc_phase(beat_index, num_sections, prior_summary)
     ke_spec = _arc_key_events_spec(ke_min, ke_max, lang)
@@ -858,13 +863,14 @@ def generate_typified_beat(
             "Prioritize story quality: concrete imagery, causal clarity, character voice, and emotional stakes. "
             "LENGTH BUDGET: setting + characters + key_events together under ~200 English words. "
             "setting: ONE line — time + place (~15–28 words). "
-            "characters: 2–4 lines, each starts with '- ', format "
+            f"characters: {char_spec_en}, each starts with '- ', format "
             "'Name: role, relationship, in-scene action (8–18 words; concise, not a biography)'. "
             f"key_events: {ke_spec}, each starts with '- ', "
             f"each {TYPIFIED_KEY_EVENT_CHARS_MIN}–{TYPIFIED_KEY_EVENT_CHARS_MAX} words, "
             "vivid causal beats that clearly advance the plot; no prose paragraphs. "
             f"This section is in the {arc_label} arc of the story. "
             "If a canon list is given, reuse exact character names. "
+            "SEED CAST: If sparkles name protagonists, you MUST keep those exact names and roles—do not replace them with new characters. "
             "CHARACTER CONTINUITY: If prior character profiles are given, the characters field MUST update them—"
             "keep every locked name unchanged; refresh motives, relationships, and in-scene status for this beat; "
             "you may add at most one new named character if the genre persona demands it. "
@@ -899,6 +905,12 @@ def generate_typified_beat(
             )
         if locked_txt:
             user += f"\nLOCKED NAMES (must all appear in characters, unchanged spelling): {locked_txt}\n"
+        seed_cast = extract_seed_cast_names(seed)
+        if seed_cast:
+            user += (
+                f"\nSEED CAST (must all appear in characters, exact spelling): "
+                f"{', '.join(seed_cast)}\n"
+            )
         user += (
             "Write one strong candidate section outline that could stand beside other genre personas. "
             "Avoid clichés and generic placeholders. Emphasize genre-specific differentiation in setting and cast."
@@ -913,7 +925,7 @@ def generate_typified_beat(
             "因果清晰、避免空泛套话与口号式描写。"
             "【篇幅】三字段中文总字数（不含空白）约 300～420 字；信息密度高但避免长篇散文。"
             "setting：仅一行，写清时间+地点（约 30～55 字）。"
-            "characters：2～4 行，每行以「- 」开头，格式「姓名：身份/关系/本节行动」（每行 12～28 字，精炼短句，禁止年龄履历式长传记）。"
+            f"characters：{char_spec_zh}，每行以「- 」开头，格式「姓名：身份/关系/本节行动」（每行 12～28 字，精炼短句，禁止年龄履历式长传记）。"
             f"key_events：{ke_spec}，每行以「- 」开头，"
             f"每条 {TYPIFIED_KEY_EVENT_CHARS_MIN}～{TYPIFIED_KEY_EVENT_CHARS_MAX} 字，"
             "写具体动作、冲突或转折，须明显推动本节情节向前，鼓励意外与画面感。"
@@ -926,6 +938,7 @@ def generate_typified_beat(
             "禁止与其它题材共用同一段落式模板或仅替换同义词。"
             f"key_events 须为 {ke_spec}；每一行必须以「- 」开头且单独承载一条完整事件或转折；"
             "禁止在一行内用多个「-」串联；禁止只输出一个「-」或空字符串；每条信息具体。若提供设定清单，人物姓名须与清单完全一致。"
+            "【种子人物】若创意种子已给出主角姓名（含「·」的复合名），characters 必须全部保留且不得改名或替换为其它人物。"
             "【连续性】若下方提供「已定前文」，本节必须在其人物状态、时间线与因果链上自然递进，禁止无视前文后果或擅自重置故事。"
             "【人物承接】若提供「已定人物档案」，characters 须在其基础上更新：所有已锁定姓名必须保留且不得改名；"
             "为每位已登场人物补充或调整本节的状态、动机与关系；可按当前题材人格新增至多一名新角色。"
@@ -955,6 +968,15 @@ def generate_typified_beat(
             )
         if locked_txt:
             user += f"\n【锁定姓名（characters 中必须全部出现，拼写不变）】{locked_txt}\n"
+        seed_cast = extract_seed_cast_names(seed)
+        if seed_cast:
+            if lang == "en":
+                user += (
+                    f"\nSEED CAST (must all appear in characters, exact spelling): "
+                    f"{', '.join(seed_cast)}\n"
+                )
+            else:
+                user += f"\n【创意种子既定人物（须全部出现在 characters，禁止替换或改名）】{'、'.join(seed_cast)}\n"
         user += (
             "请生成高完成度小节纲要，并确保与同批其它题材人格候选在设定与人物上明显可区分。"
         )
@@ -1242,7 +1264,11 @@ def generate_unified_functional_plans(
     arc_label = _arc_phase_label(arc_phase, lang)
     ke_spec = _arc_key_events_spec(ke_min, ke_max, lang)
     roles = [(n, t) for n, t in roles if not is_unified_plan_excluded_role(n, lang)]
-    locked = [n.strip() for n in (locked_character_names or []) if (n or "").strip()]
+    locked = merge_unique_names(
+        [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
+        extract_seed_cast_names(seed),
+    )
+    seed_cast = extract_seed_cast_names(seed)
     role_names = [n for n, _ in roles]
     roles_block = "\n".join(f"- {n}：{t}" for n, t in roles)
     headers = "、".join(f"【{n}】" for n in role_names)
@@ -1338,6 +1364,7 @@ def generate_unified_functional_plans(
             "【冲突设计师】只写核心矛盾、戏剧冲突、悬念三类 bullet，禁止「阻碍/障碍」栏。"
             "【人物塑造师】禁止使用「动机是」「关系是」「本节状态」等标签；禁止单独写本节状态句；"
             "同一姓名不得拆成「阿依古丽」与「古丽」两条。"
+            "【种子人物】若创意种子已给出主角姓名，人物塑造师必须全部保留，禁止替换为其它人物。"
             "【姓名完整性】须使用设定清单与前文中的完整人名，禁止截断（如「艾买提」不得写成「艾买」，「阿依古丽」不得写成「古丽」）。"
             f"【人物塑造师】分块仅写真实人物姓名，每行「角色名：……」；"
             f"恰好 {sculpt_target} 人（不多不少），缺一人则视为不合格；"
@@ -1353,6 +1380,14 @@ def generate_unified_functional_plans(
             f"创意种子：{seed}\n当前小节：{beat_title} — {beat_hint}\n"
             f"纳入统筹的职能：\n{roles_block}\n"
         )
+    if seed_cast:
+        if lang == "en":
+            user += (
+                f"\nSEED CAST (must all appear in Character Sculptor, exact spelling, no replacements): "
+                f"{', '.join(seed_cast)}\n"
+            )
+        else:
+            user += f"\n【创意种子既定人物（人物塑造师须全部保留，禁止替换或改名）】{'、'.join(seed_cast)}\n"
     if (prior_summary or "").strip():
         user += f"\n【已定前文】\n{(prior_summary or '')[:prior_cap]}\n"
         if beat_index > 0 and lang == "zh":

@@ -251,6 +251,53 @@ def parse_colon_lines(text: str, *, context: str = "") -> Dict[str, str]:
     return _dedupe_suffix_name_keys(out)
 
 
+_SEED_COMPOUND_NAME = re.compile(
+    r"([\u4e00-\u9fffA-Za-z]{2,12}(?:[·．\.][\u4e00-\u9fffA-Za-z]{1,10})+)"
+    r"(?=[在将向对把被给让与和、，,。；：:\s]|$)"
+)
+_SEED_LEAD_ACTOR = re.compile(
+    r"^[\s「『\"'（(]*"
+    r"([\u4e00-\u9fffA-Za-z]{2,12}(?:[·．\.][\u4e00-\u9fffA-Za-z]{1,10})+|[\u4e00-\u9fff]{2,5})"
+    r"(?=[在将向对把被给让与和、，,。；]|$)"
+)
+
+
+def _is_seed_cast_name(name: str, *, context: str = "") -> bool:
+    n = (name or "").strip()
+    if not n or len(n) < 2 or len(n) > 24:
+        return False
+    if _REJECT_NAME_FRAG.search(n):
+        return False
+    if re.search(r"[·．\.]", n):
+        parts = [p for p in re.split(r"[·．\.]", n) if p]
+        if parts and all(re.fullmatch(r"[\u4e00-\u9fffA-Za-z]+", p) for p in parts):
+            return True
+    if _is_person(n):
+        return True
+    return _is_loose_cast_name(n, context=context)
+
+
+def extract_seed_cast_names(text: str, *, limit: int = 6) -> List[str]:
+    """从创意种子提取既定主角/人名（含「达芬奇·狗剩」等带点复合名）。"""
+    blob = (text or "").strip()
+    if not blob:
+        return []
+
+    found: List[str] = []
+    for pat in (_SEED_COMPOUND_NAME, _SEED_LEAD_ACTOR):
+        for m in pat.finditer(blob):
+            n = m.group(1).strip()
+            if _is_seed_cast_name(n, context=blob) and n not in found:
+                found.append(n)
+
+    for n in extract_cast_from_narrative(blob, limit=limit):
+        if n not in found:
+            found.append(n)
+
+    ranked = sorted(found, key=lambda n: (-_mentions(blob, n), found.index(n)))
+    return ranked[:limit]
+
+
 def extract_cast_from_narrative(text: str, *, limit: int = 8) -> List[str]:
     """从剧情文本提取人物：并列结构 + display_utils 严格扫描。"""
     from narrativeloom.utils.display_utils import extract_names_from_narrative, extract_relation_names

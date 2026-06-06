@@ -271,8 +271,13 @@ def _assemble_all_beats_text(lg: str, n: int) -> str:
 
 
 def _locked_character_names(beat_idx: int, lg: str) -> List[str]:
-    """前文与背景中已登场人物（只增不减）；不从设定构建等非人物分块提取。"""
+    """前文、背景与创意种子中已登场/既定人物（只增不减）。"""
+    from narrativeloom.domain.character_names import extract_seed_cast_names
+
     lists: List[List[str]] = []
+    seed = (st.session_state.get("seed") or "").strip()
+    if seed:
+        lists.append(extract_seed_cast_names(seed))
     bg = (st.session_state.get("background_characters") or "").strip()
     if bg:
         lists.append(extract_character_names_from_text(bg))
@@ -317,6 +322,13 @@ def _default_character_target(beat_idx: int, lg: str) -> int:
     locked = _locked_character_names(beat_idx, lg)
     base = int(st.session_state.get("fn_story_char_total") or 2)
     return min(14, max(base, len(locked)))
+
+
+def _default_typified_character_target(beat_idx: int, lg: str) -> int:
+    """类型化：人数默认稳定；须覆盖种子与前文锁定人物。"""
+    locked = _locked_character_names(beat_idx, lg)
+    base = int(st.session_state.get("typ_story_char_total") or 2)
+    return min(8, max(base, len(locked), 2))
 
 
 def _prior_summary(idx: int, labels: List[Tuple[str, str]], lg: str) -> str:
@@ -524,6 +536,12 @@ def _parallel_typified(
     prior = _prior_summary(beat_idx, labels, lang)
     locked_chars = _locked_character_names(beat_idx, lang)
     prior_chars = _prior_characters_block(beat_idx, labels, lang) if beat_idx > 0 else ""
+    char_target = int(
+        st.session_state.get(
+            f"typ_char_total_{beat_idx}",
+            _default_typified_character_target(beat_idx, lang),
+        )
+    )
     personas = get_typified_personas(lang)
     if TYPIFIED_GEN_COUNT > 0:
         personas = personas[:TYPIFIED_GEN_COUNT]
@@ -552,6 +570,7 @@ def _parallel_typified(
                     prior_characters_block=prior_chars,
                     beat_index=beat_idx,
                     num_sections=len(labels),
+                    character_target_total=char_target,
                 )
             except Exception as e:  # noqa: BLE001
                 last_err = e
@@ -1586,6 +1605,30 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                     _kickoff_beat_generation(idx, pool)
 
                 elif pool == "genre" and typ_ready:
+                    locked_chars = _locked_character_names(idx, lg)
+                    char_min = max(2, len(locked_chars))
+                    char_default = _default_typified_character_target(idx, lg)
+                    if f"typ_char_total_{idx}" not in st.session_state:
+                        st.session_state[f"typ_char_total_{idx}"] = char_default
+                    st.number_input(
+                        T("typ_char_count_label", lg),
+                        min_value=char_min,
+                        max_value=8,
+                        step=1,
+                        key=f"typ_char_total_{idx}",
+                        help=T("typ_char_count_hint", lg).format(
+                            names="、".join(locked_chars) if locked_chars else T("fn_char_none", lg)
+                        ),
+                    )
+                    if idx == 0:
+                        st.session_state.typ_story_char_total = int(
+                            st.session_state.get(f"typ_char_total_{idx}", char_default)
+                        )
+                    if st.button(T("typ_regen_plans", lg), key=f"typ_regen_{idx}", type="secondary"):
+                        st.session_state.typ_story_char_total = int(
+                            st.session_state.get(f"typ_char_total_{idx}", char_default)
+                        )
+                        _kickoff_beat_generation(idx, "genre")
                     lookup = {nm: d for nm, d in st.session_state.typified_candidates}
                     sel = render_typified_carousel(
                         lg,

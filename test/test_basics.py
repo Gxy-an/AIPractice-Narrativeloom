@@ -2,6 +2,7 @@
 """基础单元测试（纯函数）。"""
 
 from narrativeloom.domain.coherence import analyze_story
+from narrativeloom.domain.character_names import extract_seed_cast_names
 from narrativeloom.utils.display_utils import (
     _html_escape_mutations,
     prepare_mutation_display_text,
@@ -37,3 +38,9 @@ def test_mutation_highlight_standard_markers():
     html = _html_escape_mutations("⟦mut⟧改动句⟦/mut⟧")
     assert "nl-mut-highlight" in html
     assert "改动句" in html
+
+
+def test_extract_seed_cast_compound_name():
+    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》，模特是十二头猪"
+    names = extract_seed_cast_names(seed)
+    assert "达芬奇·狗剩" in names
