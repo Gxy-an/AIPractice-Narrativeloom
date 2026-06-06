@@ -41,9 +41,19 @@ from narrativeloom.domain.personas import (
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-TYPIFIED_KEY_EVENTS_COUNT = 3
-PROSE_CHARS_PER_SECTION_MIN = 600
-PROSE_CHARS_PER_SECTION_MAX = 800
+TYPIFIED_KEY_EVENT_CHARS_MIN = 25
+TYPIFIED_KEY_EVENT_CHARS_MAX = 35
+PROSE_CHARS_PER_SECTION_MIN = 800
+PROSE_CHARS_PER_SECTION_MAX = 1000
+
+_PROSE_SECTION_STYLE_ZH = (
+    "禁止平铺直叙与流水账；须穿插对话、环境氛围、人物动作与感官细节，"
+    "句式长短错落，场景有画面感与张力。"
+)
+_PROSE_SECTION_STYLE_EN = (
+    "Avoid flat summary narration; weave in dialogue, setting and atmosphere, "
+    "physical action, and sensory detail with varied sentence rhythm and tension."
+)
 
 
 def _clamp_section_count(num_sections: int) -> int:
@@ -53,6 +63,30 @@ def _clamp_section_count(num_sections: int) -> int:
 def _prose_length_budget(num_sections: int) -> tuple[int, int]:
     n = _clamp_section_count(num_sections)
     return n * PROSE_CHARS_PER_SECTION_MIN, n * PROSE_CHARS_PER_SECTION_MAX
+
+
+def _arc_key_events_range(beat_idx: int, num_sections: int) -> tuple[int, int]:
+    """开篇 3 条；发展 3～4 条；高潮 4～5 条。"""
+    phase = _story_arc_phase(beat_idx, num_sections, "")
+    if phase == "opening":
+        return 3, 3
+    if phase == "development":
+        return 3, 4
+    return 4, 5
+
+
+def _arc_key_events_spec(ke_min: int, ke_max: int, lang: str) -> str:
+    if ke_min == ke_max:
+        return f"exactly {ke_min} lines" if lang == "en" else f"恰好 {ke_min} 条"
+    if lang == "en":
+        return f"{ke_min}–{ke_max} lines"
+    return f"{ke_min}～{ke_max} 条"
+
+
+def _arc_phase_label(phase: str, lang: str) -> str:
+    if lang == "en":
+        return {"opening": "opening", "development": "development", "climax": "climax"}.get(phase, phase)
+    return {"opening": "开篇", "development": "发展", "climax": "高潮"}.get(phase, phase)
 
 
 def _json_sanitize(s: str) -> str:
@@ -150,14 +184,18 @@ def _backfill_typified_key_events(
     genre_hint: str,
     prior_summary: str,
     lang: str,
+    ke_min: int = 3,
+    ke_max: int = 3,
 ) -> str:
     """主生成 JSON 截断或漏字段时，单独补全 key_events（一次短调用）。"""
+    ke_spec = _arc_key_events_spec(ke_min, ke_max, lang)
     if lang == "en":
         system = (
             "You write ONLY the key_events string for one story section. Output JSON only, no markdown: "
-            f'{{"key_events":"..."}} . The value is ONE string with exactly {TYPIFIED_KEY_EVENTS_COUNT} lines separated by \\n; '
+            f'{{"key_events":"..."}} . The value is ONE string with {ke_spec} separated by \\n; '
             "each line starts with hyphen-minus followed by space as a bullet; "
-            "each line one concrete causal beat aligned with the locked setting and cast; match the genre persona angle."
+            f"each line about {TYPIFIED_KEY_EVENT_CHARS_MIN}–{TYPIFIED_KEY_EVENT_CHARS_MAX} words, "
+            "one concrete causal beat that advances the plot; match the genre persona angle."
         )
         user = (
             f"Sparkles: {seed}\nSection: {beat_title} — {beat_hint}\nGenre persona: {genre_name} ({genre_hint})\n"
@@ -167,8 +205,9 @@ def _backfill_typified_key_events(
     else:
         system = (
             "你只负责补全一个小节的「核心事件」字段。只输出 JSON，不要 Markdown："
-            f'{{"key_events":"……"}} 。key_events 为单个字符串，内含恰好 {TYPIFIED_KEY_EVENTS_COUNT} 行，用 \\n 换行；'
-            "每行以「- 」开头；每行一条完整事件或转折，必须与上方已定设定、人物一致，并体现题材人格「"
+            f'{{"key_events":"……"}} 。key_events 为单个字符串，内含 {ke_spec}，用 \\n 换行；'
+            f"每行以「- 」开头；每条 {TYPIFIED_KEY_EVENT_CHARS_MIN}～{TYPIFIED_KEY_EVENT_CHARS_MAX} 字，"
+            "写具体动作、冲突或转折，须明显推动本节情节向前；必须与上方已定设定、人物一致，并体现题材人格「"
             + genre_name
             + "」的典型节奏；禁止空话、禁止只输出一个减号、禁止复述设定原文。"
         )
@@ -789,10 +828,16 @@ def generate_typified_beat(
     lang: str = "zh",
     locked_character_names: Optional[List[str]] = None,
     prior_characters_block: str = "",
+    beat_index: int = 0,
+    num_sections: int = 6,
 ) -> Dict[str, Any]:
     cfg = _cfg_or_env(llm_cfg)
     locked = [n.strip() for n in (locked_character_names or []) if (n or "").strip()]
     locked_txt = "、".join(locked) if locked else ""
+    ke_min, ke_max = _arc_key_events_range(beat_index, num_sections)
+    arc_phase = _story_arc_phase(beat_index, num_sections, prior_summary)
+    ke_spec = _arc_key_events_spec(ke_min, ke_max, lang)
+    arc_label = _arc_phase_label(arc_phase, lang)
     proc = ""
     if feedback_process:
         proc = (
@@ -815,8 +860,10 @@ def generate_typified_beat(
             "setting: ONE line — time + place (~15–28 words). "
             "characters: 2–4 lines, each starts with '- ', format "
             "'Name: role, relationship, in-scene action (8–18 words; concise, not a biography)'. "
-            f"key_events: exactly {TYPIFIED_KEY_EVENTS_COUNT} lines, each starts with '- ', each 8–14 words, "
-            "vivid causal beats that advance the plot; no prose paragraphs. "
+            f"key_events: {ke_spec}, each starts with '- ', "
+            f"each {TYPIFIED_KEY_EVENT_CHARS_MIN}–{TYPIFIED_KEY_EVENT_CHARS_MAX} words, "
+            "vivid causal beats that clearly advance the plot; no prose paragraphs. "
+            f"This section is in the {arc_label} arc of the story. "
             "If a canon list is given, reuse exact character names. "
             "CHARACTER CONTINUITY: If prior character profiles are given, the characters field MUST update them—"
             "keep every locked name unchanged; refresh motives, relationships, and in-scene status for this beat; "
@@ -864,18 +911,20 @@ def generate_typified_beat(
             "若需引号请用中文直角引号「」或单引号，或对引号写作 \\\"。否则会导致解析失败。"
             "以故事质量为最高优先级：设定要有具体时间地点与感官细节；人物写清姓名与本节行动驱动即可，避免长篇小传；"
             "因果清晰、避免空泛套话与口号式描写。"
-            "【篇幅】三字段中文总字数（不含空白）约 260～360 字；信息密度高但避免长篇散文。"
+            "【篇幅】三字段中文总字数（不含空白）约 300～420 字；信息密度高但避免长篇散文。"
             "setting：仅一行，写清时间+地点（约 30～55 字）。"
             "characters：2～4 行，每行以「- 」开头，格式「姓名：身份/关系/本节行动」（每行 12～28 字，精炼短句，禁止年龄履历式长传记）。"
-            f"key_events：恰好 {TYPIFIED_KEY_EVENTS_COUNT} 条，每行以「- 」开头，每条 14～24 字，"
-            "写具体动作、冲突或转折，本节须有明显情节推进，鼓励意外与画面感。"
+            f"key_events：{ke_spec}，每行以「- 」开头，"
+            f"每条 {TYPIFIED_KEY_EVENT_CHARS_MIN}～{TYPIFIED_KEY_EVENT_CHARS_MAX} 字，"
+            "写具体动作、冲突或转折，须明显推动本节情节向前，鼓励意外与画面感。"
+            f"本节处于叙事弧「{arc_label}」阶段。"
             "【硬性】characters 与 key_events 均不得为空、不得只输出「—」或单个减号；若信息不足须合理补全。"
             "【题材差异化硬性要求】你只代表当前题材人格「"
             + genre_name
             + "」：setting 与 characters 必须写出该题材独有的母题、场景类型、人物身份与矛盾抓手，"
             "与并行输出的其它题材版本在「地点/空间」「叙事视角」「人物配置」上必须拉开显著差距，"
             "禁止与其它题材共用同一段落式模板或仅替换同义词。"
-            f"key_events 必须恰好 {TYPIFIED_KEY_EVENTS_COUNT} 条；每一行必须以「- 」开头且单独承载一条完整事件或转折；"
+            f"key_events 须为 {ke_spec}；每一行必须以「- 」开头且单独承载一条完整事件或转折；"
             "禁止在一行内用多个「-」串联；禁止只输出一个「-」或空字符串；每条信息具体。若提供设定清单，人物姓名须与清单完全一致。"
             "【连续性】若下方提供「已定前文」，本节必须在其人物状态、时间线与因果链上自然递进，禁止无视前文后果或擅自重置故事。"
             "【人物承接】若提供「已定人物档案」，characters 须在其基础上更新：所有已锁定姓名必须保留且不得改名；"
@@ -937,6 +986,8 @@ def generate_typified_beat(
             genre_hint=genre_hint,
             prior_summary=prior_summary or "",
             lang=lang,
+            ke_min=ke_min,
+            ke_max=ke_max,
         )
         if bf:
             data["key_events"] = bf
@@ -1135,9 +1186,14 @@ def generate_unified_functional_plans(
     locked_worldview: Optional[str] = None,
     prior_beat_homogeneity_digest: str = "",
     locked_setting_baseline: str = "",
+    num_sections: int = 6,
 ) -> Dict[str, Any]:
     """一次统筹全部职能，返回 plan_count 个完整小节总体方案（含【职能】分块）。"""
     cfg = _cfg_or_env(llm_cfg)
+    ke_min, ke_max = _arc_key_events_range(beat_index, num_sections)
+    arc_phase = _story_arc_phase(beat_index, num_sections, prior_summary)
+    arc_label = _arc_phase_label(arc_phase, lang)
+    ke_spec = _arc_key_events_spec(ke_min, ke_max, lang)
     roles = [(n, t) for n, t in roles if not is_unified_plan_excluded_role(n, lang)]
     locked = [n.strip() for n in (locked_character_names or []) if (n or "").strip()]
     role_names = [n for n, _ in roles]
@@ -1154,6 +1210,15 @@ def generate_unified_functional_plans(
         )
     )
     sculpt_target = character_target_total if character_target_total is not None else max(2, len(locked))
+    arc_events_en = (
+        f"Narrative arc: {arc_label}. Plot Logic role must output {ke_spec} bullet lines "
+        f"({TYPIFIED_KEY_EVENT_CHARS_MIN}–{TYPIFIED_KEY_EVENT_CHARS_MAX} words each), each a causal story beat."
+    )
+    arc_events_zh = (
+        f"【叙事弧·关键事件】本节为「{arc_label}」阶段；【剧情逻辑师】须输出 {ke_spec} bullet，"
+        f"每条 {TYPIFIED_KEY_EVENT_CHARS_MIN}～{TYPIFIED_KEY_EVENT_CHARS_MAX} 字，写因果推进与转折；"
+        "冲突设计师、对话设计师、细节填充师须配合上述事件密度，勿重复堆砌已知信息。"
+    )
     has_sculptor = any(is_character_sculptor_role(n, lang) for n in role_names)
     setting_fmt = (
         "Setting Architect: use SEPARATE bullet lines for 地点 and 时间 (never combine on one line); "
@@ -1197,6 +1262,8 @@ def generate_unified_functional_plans(
             "each section bullet lines starting with '- '. All roles must collaborate without contradiction. "
             f"{setting_fmt} "
             "Variants must differ sharply. Do NOT repeat events already in prior beats; only new causal steps. "
+            + arc_events_en
+            + " "
             + wv_block
             + pf_instr
         )
@@ -1214,6 +1281,7 @@ def generate_unified_functional_plans(
             f"{_UNIFIED_FN_TONE_ZH}"
             f"{_UNIFIED_FN_BULLET_FORMAT_ZH}"
             f"{_UNIFIED_FN_LENGTH_ZH}"
+            + arc_events_zh
             + (_UNIFIED_FN_BREVITY_ZH if beat_index > 0 else "")
             + "【篇幅】各职能分块精炼可读，禁止用省略号截断；"
             "人物塑造师每行用自然短句写清身份、性格与关系（承接前文），禁止占位句。"
@@ -1711,9 +1779,9 @@ def expand_functional_section(
         system = (
             "You are a fiction writer. Expand the role-outline notes into a single continuous section of prose. "
             "Multiple paragraphs, scene work, dialogue where natural, clear causal flow. "
-            f"Target about {PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words for this section only. "
-            "No JSON or bullet meta. "
-            "Honor the canon list for names. "
+            f"Target {PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words for this section only. "
+            + _PROSE_SECTION_STYLE_EN
+            + " Honor the canon list for names. "
             "Do NOT output Markdown '#' headings, section numbers, or phase labels like 'Opening'; start directly in scene."
         )
         user = (
@@ -1728,8 +1796,9 @@ def expand_functional_section(
         system = (
             "你是中文小说作者。根据各职能的「概述要点」拼接稿，扩写为**本小节独立叙事正文**。"
             "多段落：场景、动作、对白与心理穿插，因果清楚，与前文摘要自然衔接。"
-            f"篇幅目标约 {PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字（单节正文，勿写成整章长篇）。"
-            "严格遵守设定清单中人物称谓；不要输出 JSON、不要复述职能标签堆砌。"
+            f"篇幅目标 {PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字（单节正文，勿写成整章长篇）。"
+            + _PROSE_SECTION_STYLE_ZH
+            + "严格遵守设定清单中人物称谓；不要输出 JSON、不要复述职能标签堆砌。"
             "禁止输出以 # 开头的标题行、禁止写「小节1」「#开端」等结构标签；正文从第一段叙事直接起笔。"
         )
         user = (
@@ -2044,7 +2113,7 @@ def expand_prose(
     """
     将小节汇编扩写为连贯长叙事。
     返回 (title, prose)：title 为模型建议的整篇标题（可能为空）；prose 为正文。
-    总篇幅与小节数正相关：每节约 600～800 字。
+    总篇幅与小节数正相关：每节约 800～1000 字（中英文同），须含对话、环境、动作等细节。
     """
     cfg = _cfg_or_env(llm_cfg)
     bc = (beats_combined or "").strip()
@@ -2059,8 +2128,10 @@ def expand_prose(
             "subtext in dialogue; allow brief interior monologue and controlled lyricism. "
             "Avoid reportage, clichés, and flat subject-verb-object chains. "
             "Honor the outline's causality while letting scenes breathe with atmosphere and tension. "
-            f"Aim for roughly {prose_min}–{prose_max} words total ({n_sec} sections × ~600–800 words each). "
+            f"Aim for roughly {prose_min}–{prose_max} words total ({n_sec} sections × {PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words each). "
             "Do not exceed the upper bound. "
+            + _PROSE_SECTION_STYLE_EN
+            + " "
             "Output ONE JSON object ONLY, no markdown fences, keys exactly: "
             '{"title":"Short literary title for the whole piece, 4–12 words, no section numbers","prose":"..."} . '
             "The prose MUST NOT use Markdown '#' headings, section numbering, or meta labels like 'Opening'; "
@@ -2081,9 +2152,10 @@ def expand_prose(
             "禁止通篇「谁做了什么」的主谓宾流水账、公文腔与网络套话。"
             "在严守汇编因果与人物称谓的前提下，让场景有呼吸感与张力，意象要具体可感，"
             "可适度运用诗性语句，但避免堆砌辞藻或空洞抒情。"
-            f"总篇幅目标约 {prose_min}～{prose_max} 字（共 {n_sec} 个小节，每节约 600～800 字，与小节数正相关）；"
+            f"总篇幅目标约 {prose_min}～{prose_max} 字（共 {n_sec} 个小节，每节约 {PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字，与小节数正相关）；"
             "不得超过上限，避免冗长重复。"
-            "严格遵守人物称谓与设定清单。"
+            + _PROSE_SECTION_STYLE_ZH
+            + "严格遵守人物称谓与设定清单。"
             "【输出格式】只输出一个 JSON 对象，不要 Markdown 代码围栏；键名固定为："
             '{"title":"……","prose":"……"} 。'
             "title 为整篇作品的文学性标题（6～24 字），不要含小节号、不要「#开端」等相位词，不要复述正文首句。"

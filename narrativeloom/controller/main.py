@@ -550,6 +550,8 @@ def _parallel_typified(
                     lang=lang,
                     locked_character_names=locked_chars,
                     prior_characters_block=prior_chars,
+                    beat_index=beat_idx,
+                    num_sections=len(labels),
                 )
             except Exception as e:  # noqa: BLE001
                 last_err = e
@@ -625,6 +627,7 @@ def _generate_unified_functional(
         character_target_total=char_target,
         anti_repetition_digest=digest,
         beat_index=beat_idx,
+        num_sections=len(labels),
         locked_worldview=locked_wv if beat_idx > 0 else None,
         prior_beat_homogeneity_digest=homogeneity,
         locked_setting_baseline=st.session_state.get("fn_locked_setting") or "",
