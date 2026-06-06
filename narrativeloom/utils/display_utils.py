@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 _MUT_OPEN = "⟦mut⟧"
 _MUT_CLOSE = "⟦/mut⟧"
@@ -124,6 +124,7 @@ _PLACEHOLDER_CHARACTER_DESC = (
     "本节出场人物",
     "本节新出场或补充角色",
     "与本节冲突相关",
+    "本节主要人物",
 )
 
 
@@ -307,36 +308,31 @@ def sanitize_typified_characters(
     key_events: str = "",
     prior_characters_block: str = "",
     strict_narrative_allowlist: bool = False,
-    global_cast_names: Optional[List[str]] = None,
 ) -> str:
     """过滤类型化 characters 中的非人物条目，补满目标人数。"""
     from narrativeloom.domain.character_names import (
         _build_sculptor_allowlist,
+        _fallback_supplementary_name,
         _is_subname_of_compound_cast,
         _resolve_cast_name,
         _scrub_cast_name,
         is_false_person_name,
         merge_unique_names,
     )
-    from narrativeloom.domain.global_character_list import fallback_name_from_global_cast
 
     raw = coerce_display_text(text).strip()
     context = f"{seed}\n{setting}\n{key_events}\n{raw}"
     locked = merge_unique_names(list(locked_names or []))
     prior_profiles = parse_character_profile_map(prior_characters_block)
     target = max(2, min(int(target), 8))
-    global_cast = merge_unique_names(list(global_cast_names or []), locked)
-    plot_allow = _build_sculptor_allowlist(
+    allowlist = _build_sculptor_allowlist(
         seed=seed,
         locked_names=locked,
         plot_sources=[key_events],
         setting_context=setting,
         body=raw,
     )
-    allow_set: set[str] = set(global_cast) | set(locked) | set(plot_allow)
-    if strict_narrative_allowlist:
-        allowlist = plot_allow
-        allow_set = set(allowlist) | set(locked) | set(global_cast)
+    allow_set = set(allowlist)
     raw_map: Dict[str, str] = {}
     for entry in _split_character_entries(raw):
         line = entry.lstrip("-·• ").strip()
@@ -363,6 +359,14 @@ def sanitize_typified_characters(
             in_locked = n in locked or resolved_anchor in locked
             if not in_allow and not in_locked:
                 return
+        elif n not in allow_set and n not in locked:
+            from narrativeloom.domain.character_names import _is_compound_cast_name, _is_seed_cast_name
+
+            is_seed = _is_seed_cast_name(n, context=context) or _is_compound_cast_name(n)
+            if not is_seed:
+                raw_desc = (desc or raw_map.get(n, "")).strip()
+                if not raw_desc or _is_placeholder_character_desc(raw_desc):
+                    return
         seen.add(n)
         resolved = _resolve_character_description(
             n,
@@ -373,7 +377,13 @@ def sanitize_typified_characters(
             prior_profiles=prior_profiles,
             raw_map=raw_map,
         )
-        kept.append((n, resolved))
+        kept.append((n, _cap_character_desc(resolved)))
+
+    def _cap_character_desc(desc: str, *, max_len: int = 28) -> str:
+        d = re.sub(r"\s+", " ", (desc or "").strip())
+        if len(d) <= max_len:
+            return d
+        return d[: max_len - 1].rstrip("，,；; ") + "…"
 
     for lk in locked:
         if lk and lk not in seen:
@@ -381,99 +391,35 @@ def sanitize_typified_characters(
     for name, desc in raw_map.items():
         _push(name, desc)
 
-    cast_names = [n for n, _ in kept]
-
-    def _fill_from_plot_allowlist() -> None:
-        nonlocal cast_names
-        ranked = _sort_allowlist_by_plot(
-            _filter_allowlist_subnames(allow_set), key_events
-        )
-        for candidate in ranked:
-            if len(cast_names) >= target:
+    def _fill_from_allowlist() -> List[str]:
+        for n in allowlist:
+            if len(kept) >= target:
                 break
-            if candidate in seen:
+            if n in seen:
                 continue
-            if _is_subname_of_compound_cast(candidate, locked + cast_names):
-                continue
-            before = len(kept)
-            _push(candidate, raw_map.get(candidate, ""))
-            if len(kept) > before:
-                cast_names = [n for n, _ in kept]
+            _push(n, raw_map.get(n, ""))
+        return [n for n, _ in kept]
 
-    _fill_from_plot_allowlist()
-
-    cast_names = [n for n, _ in kept]
+    cast_names = _fill_from_allowlist()
+    plot_context = f"{seed}\n{setting}\n{key_events}"
+    tried_extras: set[str] = set()
     while len(cast_names) < target:
-        extra = ""
-        if global_cast:
-            extra = fallback_name_from_global_cast(cast_names, global_cast, context=context)
-        if not extra and allow_set:
-            ranked = _sort_allowlist_by_plot(
-                _filter_allowlist_subnames(allow_set), key_events
-            )
-            for candidate in ranked:
-                if candidate in cast_names:
-                    continue
-                if _is_subname_of_compound_cast(candidate, locked + cast_names):
-                    continue
-                clean = _scrub_cast_name(candidate, cast_names, context=context)
-                if clean and clean not in cast_names:
-                    extra = clean
-                    break
-        if not extra and not strict_narrative_allowlist:
-            from narrativeloom.domain.character_names import _fallback_supplementary_name
-
-            plot_context = f"{seed}\n{setting}\n{key_events}"
-            extra = _fallback_supplementary_name(
-                cast_names, full=context, seed=seed, narrative=plot_context
-            )
-        if not extra and strict_narrative_allowlist:
-            from narrativeloom.domain.character_names import extract_cast_from_narrative
-
-            plot_context = f"{seed}\n{setting}\n{key_events}"
-            for candidate in extract_cast_from_narrative(plot_context, limit=12):
-                resolved = _resolve_cast_name(candidate, locked, context=context) or candidate
-                clean = _scrub_cast_name(resolved, cast_names, context=context) or resolved
-                if (
-                    clean
-                    and clean not in cast_names
-                    and (clean in allow_set or resolved in allow_set)
-                    and not is_false_person_name(clean, context=f"{clean}\n{context}")
-                ):
-                    extra = clean
-                    break
-        if not extra or extra in cast_names:
+        extra = _fallback_supplementary_name(
+            cast_names, full=context, seed=seed, narrative=plot_context
+        )
+        if not extra or extra in cast_names or extra in tried_extras:
             break
+        tried_extras.add(extra)
         before = len(kept)
         _push(extra, "")
         if len(kept) == before:
             break
         cast_names = [n for n, _ in kept]
 
+    cast_names = _fill_from_allowlist()
+
     lines = [f"- {n}：{d}" for n, d in kept[:target]]
     return "\n".join(lines) if lines else raw
-
-
-def _filter_allowlist_subnames(candidates: Sequence[str]) -> List[str]:
-    """去掉被更长正式姓名包含的短片段（如 利亚 ⊂ 玛利亚）。"""
-    uniq = list(dict.fromkeys(c for c in candidates if c))
-    out: List[str] = []
-    for n in sorted(uniq, key=len, reverse=True):
-        if any(n != m and n in m for m in uniq):
-            continue
-        out.append(n)
-    return out
-
-
-def _sort_allowlist_by_plot(candidates: Sequence[str], plot_text: str) -> List[str]:
-    plot = plot_text or ""
-    return sorted(
-        list(candidates),
-        key=lambda n: (
-            plot.find(n) if n in plot else 10_000,
-            -len(n),
-        ),
-    )
 
 
 def key_events_to_bullets(text: Any) -> str:
@@ -1359,7 +1305,7 @@ _VERB_NAME_TAIL = re.compile(
 )
 _SINGLE_CHAR_VERB_TAIL = frozenset(
     "无犯却实说问看听走来去等地得了着过等后前中外首因与时第用制抓止住说面向施触试图觉察"
-    "惊认慌怒喜怕抖颤愣呆愣喊叫骂踢砸冲追掏签绑拖挣举撞"
+    "惊认慌怒喜怕抖颤愣呆愣喊叫骂踢砸冲追掏签绑拖挣举撞提"
 )
 _SCULPTOR_GLUED_VERB = frozenset(
     "面向施触试图觉察往到见的地得了着过惊认慌怒喜怕抖颤愣喊叫骂踢砸冲追掏签绑拖挣举撞"
@@ -1372,7 +1318,7 @@ _STANDALONE_ROLE_LABEL = frozenset(
 _CN_SURNAMES = (
     "张李王刘陈林赵周马杨黄吴许苏何顾罗郑谢宋唐韩冯于董袁邓曹曾彭蒋蔡余杜叶程魏吕丁沈任姚卢姜崔谭陆汪范金石廖贾夏韦付方邹熊孟秦白江阎薛尹段雷黎史龙陶贺郝龚邵万钱严武戴莫孔向汤"
 )
-_UYGHUR_NAME_SUFFIX = re.compile(r"(?:买提|古丽|依木|夏木|克力|兰|江|汗|尔|娜|莎|木|提)$")
+_UYGHUR_NAME_SUFFIX = re.compile(r"(?:买提|古丽|依木|夏木|克力|兰|江|汗|尔|娜|莎|木)$")
 _STRICT_PERSON_NAME = re.compile(
     rf"^(?:"
     rf"(?:老)?[{_CN_SURNAMES}](?:[\u4e00-\u9fff]{{1,2}}|[\u4e00-\u9fff](?:导师|老师|教授|师傅|工|姐|哥|叔|姨))|"
@@ -1535,11 +1481,14 @@ def _finalize_sculptor_name(name: str, *, context: str = "") -> str:
         best = n
         for m in re.finditer(r"[\u4e00-\u9fff]{2,5}", ctx):
             cand = m.group(0)
-            if len(cand) <= len(n) or not cand.startswith(n[: min(2, len(n))]):
+            if len(cand) <= len(n):
+                continue
+            if not (cand.startswith(n) or (len(n) >= 2 and cand.startswith(n[:2]) and len(cand) == len(n) + 1)):
                 continue
             cand = _strip_glued_verb_from_name(cand)
             if (
                 cand
+                and len(cand) > len(n)
                 and _is_protected_compound_name(cand)
                 and _STRICT_PERSON_NAME.fullmatch(cand)
                 and _looks_like_person_name(cand)
@@ -1556,6 +1505,10 @@ def _normalize_sculptor_line_name(name: str, *, context: str = "") -> str:
     from narrativeloom.domain.character_names import _is_locked_cast_name, _is_seed_cast_name
 
     if _is_seed_cast_name(raw, context=context):
+        return raw
+    from narrativeloom.domain.character_names import _is_locked_cast_name
+
+    if _is_locked_cast_name(raw, context=context):
         return raw
     fin = _finalize_sculptor_name(raw, context=context)
     if fin:
@@ -1790,20 +1743,9 @@ def _names_from_bullet_lines(text: str) -> List[str]:
 
 
 def extract_character_names_from_text(text: str, *, sculptor_sections_only: bool = False) -> List[str]:
-    """Layer 1：仅从结构化 characters / 人物塑造师字段提取，不扫描散文正文。"""
-    from narrativeloom.domain.global_character_list import (
-        names_from_functional_outline,
-        names_from_structured_characters_field,
-    )
+    from narrativeloom.domain.character_names import extract_character_names
 
-    raw = (text or "").strip()
-    if not raw:
-        return []
-    if "【" in raw:
-        if sculptor_sections_only:
-            return names_from_functional_outline(raw)
-        return names_from_functional_outline(raw)
-    return names_from_structured_characters_field(raw)
+    return extract_character_names(text, sculptor_sections_only=sculptor_sections_only)
 
 
 def merge_unique_character_names(*name_lists: List[str]) -> List[str]:
@@ -2414,7 +2356,7 @@ def _infer_sculptor_trait(name: str, plot_text: str, setting_text: str = "") -> 
             plot,
         ):
             return f"- {name}：外来访客，初识本地"
-    return f"- {name}：关键剧情人物，动机与性格须在本小节行动中体现"
+    return f"- {name}：本节主要人物，行动推动当前情节"
 
 
 def _sculptor_line_needs_rewrite(name: str, description: str) -> bool:
@@ -2484,7 +2426,6 @@ def complete_sculptor_body(
     sculpt_target: int = 2,
     seed: str = "",
     prior_character_profiles: Optional[Dict[str, str]] = None,
-    global_cast_names: Optional[List[str]] = None,
 ) -> str:
     plot = list(plot_sources or [])
     plot_blob = _plot_narrative_for_cast(plot)
@@ -2503,7 +2444,6 @@ def complete_sculptor_body(
         key_events=plot_blob,
         prior_characters_block=prior_block,
         strict_narrative_allowlist=True,
-        global_cast_names=global_cast_names,
     )
     return scrub_functional_fragment(out)
 
@@ -2650,24 +2590,6 @@ def abbreviate_established_sections(
     return body
 
 
-def _condense_character_line(s: str, max_chars: int) -> str:
-    """压缩人物行时只截断描述，保留完整姓名。"""
-    probe = s.strip()
-    if "：" in probe or ":" in probe:
-        probe = probe.replace(":", "：")
-        name, _, desc = probe.partition("：")
-        name = name.strip()
-        desc = desc.strip()
-        if name and desc:
-            budget = max(8, max_chars - len(name) - 1)
-            if len(desc) > budget:
-                desc = desc[:budget]
-            return f"{name}：{desc}"
-    if len(probe) > max_chars:
-        return probe[:max_chars]
-    return probe
-
-
 def condense_role_body(
     body: str,
     *,
@@ -2684,10 +2606,18 @@ def condense_role_body(
         s = ln.strip().lstrip("-·•").strip()
         if not s or s in _KEY_EVENTS_TRIVIAL:
             continue
-        if truncate and len(s) > max_chars:
+        if "：" in s:
+            name, _, desc = s.partition("：")
+            name = name.strip()
+            desc = desc.strip()
+            desc_cap = max(8, max_chars - len(name) - 1)
+            if len(desc) > desc_cap:
+                desc = desc[: desc_cap - 1].rstrip("，,；; ") + "…"
+            s = f"{name}：{desc}"
+        elif truncate and len(s) > max_chars:
             s = s[: max_chars - 1] + "…"
         elif len(s) > max_chars:
-            s = _condense_character_line(s, max_chars)
+            s = s[:max_chars]
         out.append(f"- {s}")
         if len(out) >= max_lines:
             break
@@ -2719,7 +2649,6 @@ def normalize_single_unified_outline(
     beat_index: int = 0,
     seed: str = "",
     prior_character_profiles: Optional[Dict[str, str]] = None,
-    global_cast_names: Optional[List[str]] = None,
 ) -> str:
     """清洗单份总体方案：截断杂糅、补全人物塑造师、规范分块。"""
     txt = scrub_functional_fragment(strip_trailing_json_leak(unescape_display_text(text)))
@@ -2787,7 +2716,6 @@ def normalize_single_unified_outline(
                 sculpt_target=sculpt_target,
                 seed=seed,
                 prior_character_profiles=prior_character_profiles,
-                global_cast_names=global_cast_names,
             )
             if beat_index > 0:
                 body = abbreviate_established_sections(

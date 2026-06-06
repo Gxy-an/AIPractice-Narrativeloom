@@ -14,31 +14,8 @@ _REJECT_NAME_FRAG = re.compile(
     r"高潮|转折|节奏|情节|剧情|环境|世界|物理|空间|设定|承接|核查|连续|监控|检查|"
     r"氛围|道具|伏笔|因果|逻辑|对话|提醒|拓展|节点|抉择|样本|陈列|诚信|突破|原则|"
     r"严谨|务实|状态|动机|性格|师$|工程|计划$|程计划|"
-    r"队员$|教授$|工程师$|研究员$|研究生$|生命体$|"
-    r"透露|过来|任何|数据时|本节|主要人物)"
-)
-
-_PHRASE_NOT_NAME = frozenset(
-    {
-        "过来",
-        "过去",
-        "回来",
-        "上去",
-        "下来",
-        "进去",
-        "出去",
-        "上来",
-        "下去",
-        "进来",
-        "任何",
-        "数据时",
-        "透露任何",
-        "本节",
-        "主要",
-        "人物",
-        "本节主要",
-        "主要人物",
-    }
+    r"队员$|生命体$|"
+    r"交换|互换|兑换|假装|装没|没见|佯装|相互|不知|该信|相信|矛盾|警$|的警|的告|的话)"
 )
 
 
@@ -99,14 +76,14 @@ _DESCRIPTOR_NAME = re.compile(
     r"^(沾满|戴着|戴圆|万物|炭灰|面粉|猪圈|模特|墙上|最后|晚餐|圆框|画笔|油彩|"
     r"双手|一手|一手|背景|前景|画面|构图|颜料|墙壁|墙皮|泥墙|"
     r"严谨|务实|当前|本节|状态|动机|性格|身份|任务|张力|高潮|转折|悬念|"
-    r"透露|过来|任何|数据|信息|保密|"
     r"核心|戏剧|情节|剧情|伏笔|主题|矛盾|冲突|节奏|"
     r"黎明|黄昏|清晨|午夜|正午|凌晨|傍晚|拂晓|深夜|白天|夜晚|上午|下午|中午|"
     r"周一|周二|周三|周四|周五|周六|周日|周天|"
     r"周[一二三四五六日天][上下]?|"
     r"陶罐|瓷罐|旧罐|空罐|"
     r"他|她|它|我|你|您|们|这|那|其|某|各|每|两|三|四|五|六|七|八|九|十|"
-    r"十二|一头|一头|一头猪|模特是)"
+    r"十二|一头|一头|一头猪|模特是|"
+    r"交换|互换|假装|装没|没见|佯装|相互|不知|相信)"
 )
 
 _TIME_POINT_WORDS = frozenset(
@@ -190,17 +167,6 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
     n = (name or "").strip()
     if not n:
         return True
-    if n in _PHRASE_NOT_NAME:
-        return True
-    if n.endswith("任何") or n.startswith("透露"):
-        return True
-    if re.match(r"^(过来|过去|回来|上来|下去|进来|出去)$", n):
-        return True
-    if len(n) <= 5 and re.match(r"^(数据|信息|保密|透露|本节|主要|关键|剧情)", n):
-        return True
-    blob = f"{n}\n{context or ''}"
-    if re.search(r"不得透露任何|透露任何|保密条例", blob) and n in ("透露任何", "任何", "透露"):
-        return True
     if _DEVICE_OR_MACHINE.search(n):
         return True
     if _is_compound_cast_name(n) or _is_seed_cast_name(n, context=context):
@@ -229,11 +195,13 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
         return True
     if re.match(r"^[假借][采访访]", n) or n in ("间时", "假采访", "假借访"):
         return True
-    if n in ("交换", "交易", "贸易", "警", "警告", "提醒"):
+    if re.search(r"(假装|装没|没见|佯装|假装没)", n):
         return True
-    if re.search(r"的(警|诫|告|符|兆|意|图|线|点)$", n):
+    if re.search(r"的(警|告|话|声|言|词|语|影|像|示|诫)", n):
         return True
-    if re.search(r"假装|装作|佯装", n):
+    if n in ("交换", "互换", "兑换", "消息", "情报", "警告", "相互", "矛盾"):
+        return True
+    if n in ("教授", "工程师", "研究员", "研究生", "地质师", "师"):
         return True
     if _DESCRIPTOR_NAME.search(n):
         return True
@@ -500,12 +468,12 @@ def parse_colon_lines(text: str, *, context: str = "") -> Dict[str, str]:
 
 _SEED_COMPOUND_NAME = re.compile(
     r"([\u4e00-\u9fffA-Za-z]{2,10}(?:[·．\.][\u4e00-\u9fffA-Za-z]{1,8})+)"
-    r"(?=[在将向对把被给让与和、，,。；：:\s]|$)"
+    r"(?=[在将向对把被给让与和、，,。；：:\s来去到]|$)"
 )
 _SEED_LEAD_ACTOR = re.compile(
     r"^[\s「『\"'（(]*"
     r"([\u4e00-\u9fffA-Za-z]{2,12}(?:[·．\.][\u4e00-\u9fffA-Za-z]{1,10})+|[\u4e00-\u9fff]{2,5})"
-    r"(?=[在将向对把被给让与和、，,。；]|$)"
+    r"(?=[在将向对把被给让与和、，,。；来去到]|$)"
 )
 
 
@@ -533,9 +501,21 @@ def _is_seed_cast_name(name: str, *, context: str = "") -> bool:
         return False
     if _DESCRIPTOR_NAME.search(n):
         return False
-    if re.match(rf"^{re.escape(n)}(?=[在将向对把被给让与和、，,。；：:\s]|$)", ctx):
+    if re.match(rf"^{re.escape(n)}(?=[在将向对把被给让与和、，,。；：:\s来去到]|$)", ctx):
         return bool(re.fullmatch(r"[\u4e00-\u9fffA-Za-z]{2,12}", n))
     return False
+
+
+def _trim_seed_name_glued_suffix(name: str, *, context: str = "") -> str:
+    """「艾买提常来」误识为「艾买提常」时还原为「艾买提」。"""
+    n = (name or "").strip()
+    blob = context or ""
+    if len(n) >= 3 and n[-1] in "常往往总频频":
+        stem = n[:-1]
+        if blob and re.search(rf"{re.escape(stem)}{re.escape(n[-1])}[来去到在向]", blob):
+            if _is_narrative_cast_candidate(stem, context=blob) or _is_seed_cast_name(stem, context=blob):
+                return stem
+    return n
 
 
 def extract_seed_cast_names(text: str, *, limit: int = 6) -> List[str]:
@@ -547,11 +527,12 @@ def extract_seed_cast_names(text: str, *, limit: int = 6) -> List[str]:
     found: List[str] = []
     for pat in (_SEED_COMPOUND_NAME, _SEED_LEAD_ACTOR):
         for m in pat.finditer(blob):
-            n = m.group(1).strip()
+            n = _trim_seed_name_glued_suffix(m.group(1).strip(), context=blob)
             if _is_seed_cast_name(n, context=blob) and n not in found:
                 found.append(n)
 
     for n in extract_cast_from_narrative(blob, limit=limit):
+        n = _trim_seed_name_glued_suffix(n, context=blob)
         if n not in found:
             found.append(n)
 
@@ -585,6 +566,7 @@ _VERB_AFTER_NAME = (
     "监视",
     "跟踪",
     "砸碎",
+    "假装",
 )
 _VERB_AFTER_NAME_RE = "|".join(
     sorted({re.escape(v) for v in _VERB_AFTER_NAME}, key=len, reverse=True)
@@ -603,6 +585,7 @@ _VERB_NAME_TAIL = (
     "观察",
     "发现",
     "清理",
+    "假装",
 )
 
 
@@ -642,7 +625,14 @@ def _extract_verbed_cn_names(text: str, *, limit: int = 8) -> List[str]:
         if len(found) >= limit:
             break
     for m in re.finditer(r"([\u4e00-\u9fff]{2,4})(?=见[\u4e00-\u9fff])", blob):
+        start = m.start()
         name = m.group(1)
+        if start > 0 and re.match(r"[\u4e00-\u9fff]", blob[start - 1]):
+            expanded = blob[start - 1 : start + len(name)]
+            if _is_narrative_cast_candidate(expanded, context=blob):
+                name = expanded
+            else:
+                continue
         if name.endswith(("撞", "听", "看")) and len(name) >= 3:
             name = name[:-1]
         name = _strip_verbed_name_tail(name)
@@ -758,12 +748,9 @@ def _build_sculptor_allowlist(
             allow.append(n)
     for raw in extract_cast_from_narrative(plot_cross, limit=12):
         resolved = _resolve_cast_name(raw, anchors, context=plot_cross) or raw
-        clean = _scrub_cast_name(resolved, allow, context=plot_cross) or resolved
-        if (
-            clean
-            and clean not in allow
-            and not is_false_person_name(clean, context=f"{clean}\n{plot_cross}")
-        ):
+        resolved = _trim_seed_name_glued_suffix(resolved, context=plot_cross)
+        clean = _scrub_cast_name(resolved, anchors + allow, context=plot_cross) or resolved
+        if clean and clean not in allow:
             allow.append(clean)
     for a in list(anchors):
         for part in re.split(r"[·．\.]", a):
@@ -863,10 +850,27 @@ def _scrub_cast_name(name: str, existing: List[str], *, context: str = "") -> st
             canon = raw
     if not canon or re.fullmatch(r"配角\d+", canon):
         return ""
+    for anchor in existing:
+        if canon.startswith(anchor) and canon != anchor and len(canon) <= len(anchor) + 1:
+            canon = anchor
+            break
     if len(canon) >= 4 and canon.endswith("出面"):
         stem = canon[:-2]
         if stem and _is_narrative_cast_candidate(stem, context=context):
             canon = stem
+    if re.search(r"(假装|装没|没见|佯装|假装没)", canon):
+        if context:
+            m = re.search(rf"([\u4e00-\u9fff]{{1,2}}){re.escape(canon)}", context)
+            if m:
+                expanded = m.group(1) + canon
+                if _is_narrative_cast_candidate(expanded, context=context):
+                    canon = expanded
+                else:
+                    return ""
+            else:
+                return ""
+        else:
+            return ""
     if is_false_person_name(canon, context=f"{canon}\n{context}"):
         return ""
     if _looks_like_scene_fragment(canon):

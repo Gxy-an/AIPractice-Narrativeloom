@@ -568,142 +568,134 @@ def test_normalize_typified_key_events_respects_length_and_total_cap():
     assert sum(len(ln) for ln in lines) <= 300
 
 
-def test_structured_cast_split_on_ampersand():
-    from narrativeloom.domain.global_character_list import names_from_structured_characters_field
-
-    raw = "韩星：记者 & 艾买提：师傅 & 交换：无效"
-    names = names_from_structured_characters_field(raw)
-    assert "韩星" in names
-    assert "艾买提" in names
-    assert "交换" not in names
-
-
-def test_extract_character_names_from_text_ignores_prose_ner():
-    from narrativeloom.utils.display_utils import extract_character_names_from_text
-
-    prose = "交换发生在集市，老僧的警言回荡，星假装没听见韩星的呼唤。"
-    assert extract_character_names_from_text(prose) == []
-
-
-def test_sanitize_typified_uses_global_cast_not_prose_garbage():
+def test_typified_rejects_exchange_and_possessive_fragment():
     from narrativeloom.utils.display_utils import sanitize_typified_characters
 
-    raw = "- 交换：市场从业者\n- 老僧的警：警告者\n- 星假装没：关键剧情人物"
+    seed = "阿依古丽在丝绸之路驿站经营客栈，艾买提常来交换商旅消息。"
+    plot = (
+        "- 艾买提讲述沙漠会说话的石头，老僧的警告与艾买提说法相互矛盾\n"
+        "- 阿依古丽不知该相信谁，门缝塞进神秘字条"
+    )
+    raw = (
+        "- 交换：集市从业者，熟稔本地风物\n"
+        "- 老僧的警：告相互矛盾，阿依古丽不知该相信谁"
+    )
     out = sanitize_typified_characters(
         raw,
         target=2,
-        locked_names=["韩星"],
-        seed="韩星在集市采访",
-        global_cast_names=["韩星", "艾买提"],
+        locked_names=["阿依古丽"],
+        seed=seed,
+        setting="唐代丝绸之路驿站大堂，客商与僧侣混杂",
+        key_events=plot,
     )
-    assert "交换" not in out
-    assert "老僧的警" not in out
-    assert "星假装没" not in out
-    assert "韩星" in out
+    names = _sculptor_names("【人物塑造师】\n" + out)
+    assert len(names) == 2
+    assert "阿依古丽" in names
+    assert "艾买提" in names
+    assert "交换" not in names
+    assert "老僧的警" not in names
+    assert "关键剧情人物" not in out
 
 
-def test_functional_coerce_respects_global_cast():
+def test_functional_rejects_pretend_verb_fragment_and_fills_target():
     from narrativeloom.service.llm_client import _coerce_unified_plan_variants
 
-    seed = "韩星在克拉玛依采访。"
+    seed = "韩星住进荒弃汽车旅馆，调查废弃油井旁的谋杀案。"
+    locked = ["韩星"]
     raw = """【设定构建师】
-- 地点：克拉玛依
-- 时间：2024年秋
+- 地点：荒弃汽车旅馆大堂
+- 时间：当代深夜
 【人物塑造师】
-- 交换：市场从业者
-- 星假装没：关键剧情人物
+- 韩星：关键剧情人物，动机与性格须在本小节行动中体现
+- 星假装没：关键剧情人物，动机与性格须在本小节行动中体现
 【剧情逻辑师】
-- 韩星假借采访接近艾买提
+- 周教授询问出租车，韩星假装没看见周教授手机上的油井地图
+- 韩星提起谋杀案后，周教授紧张地从登记册撕下一页
 【冲突设计师】
-- 核心矛盾：信任与隐瞒"""
+- 核心矛盾：周教授隐瞒与命案的关联"""
     out = _coerce_unified_plan_variants(
         [{"outline": raw}],
         plan_count=1,
         feedback_process=False,
-        locked_character_names=["韩星"],
+        locked_character_names=locked,
         character_target_total=2,
         role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
         seed=seed,
-        global_cast_names=["韩星", "艾买提"],
     )[0]["outline"]
     names = _sculptor_names(out)
+    assert len(names) == 2
     assert "韩星" in names
-    assert "艾买提" in names
-    assert "交换" not in names
+    assert "周教授" in names
     assert "星假装没" not in names
     assert "关键剧情人物" not in out
 
 
-def test_is_false_person_name_rejects_phrase_fragments():
-    from narrativeloom.domain.character_names import is_false_person_name
-
-    for bad in ("透露任何", "过来", "数据时", "任何"):
-        assert is_false_person_name(bad, context="不得透露任何信息")
-
-
-def test_sanitize_typified_enforces_exact_target_count():
+def test_typified_sanitize_fills_exact_target_count():
     from narrativeloom.utils.display_utils import sanitize_typified_characters
 
-    raw = (
-        "- 陈默：导师，地质学家\n"
-        "- 林星：研究生助手\n"
-        "- 奇拉：沙虫信使"
-    )
-    plot = "阿依夏在监控室呼叫赵工，陈默与林星赶到深井"
+    seed = "刘远在克拉玛依干果店调查数据篡改，阿依古丽是店主。"
+    plot = "- 刘远多次光顾干果店，阿依古丽怀疑他是竞争对手间谍"
     out = sanitize_typified_characters(
-        raw,
-        target=4,
-        locked_names=[],
-        seed="克拉玛依深井",
-        setting="公元2147年克拉玛依地下城",
+        "- 刘远：店员",
+        target=2,
+        locked_names=["刘远"],
+        seed=seed,
+        setting="2024年克拉玛依老城干果店",
         key_events=plot,
-        global_cast_names=["陈默", "林星", "阿依夏", "赵工"],
     )
     names = _sculptor_names("【人物塑造师】\n" + out)
-    assert len(names) == 4
-    assert "透露任何" not in names
-    assert "过来" not in names
+    assert len(names) == 2
+    assert "刘远" in names
+    assert "阿依古丽" in names
 
 
-def test_functional_syncs_plot_cast_and_rejects_phrase_names():
+def test_functional_three_person_target_from_multiple_seeds():
     from narrativeloom.service.llm_client import _coerce_unified_plan_variants
 
-    seed = "艾克拜尔在克拉玛依地质勘探队实习。"
-    raw = """【设定构建师】
-- 地点：克拉玛依郊外深地实验室
-- 时间：2189年下午
+    cases = [
+        (
+            "达芬奇·狗剩在猪圈墙上画《最后的晚餐》。",
+            ["达芬奇·狗剩"],
+            3,
+            """【设定构建师】
+- 地点：猪圈
 【人物塑造师】
-- 陈洛：初级数据分析员
-- 透露任何：本节主要人物，行动推动当前情节
-- 数据时：青年研究员
+- 达芬奇·狗剩：画家
+- 到朱塞佩：借猪圈
 【剧情逻辑师】
-- 陈洛发现次声波记录中的节律脉冲
-- 阿依夏姆把陈洛叫到办公室，讨论硅基生命体
-【冲突设计师】
-- 核心冲突：科学好奇与安全审查
-- 戏剧冲突：阿依夏姆赌上学术声誉"""
-    out = _coerce_unified_plan_variants(
-        [{"outline": raw}],
-        plan_count=1,
-        feedback_process=False,
-        locked_character_names=["艾克拜尔"],
-        character_target_total=3,
-        role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
-        seed=seed,
-    )[0]["outline"]
-    names = _sculptor_names(out)
-    assert len(names) == 3
-    assert "陈洛" in names
-    assert "阿依夏姆" in names
-    assert "透露任何" not in names
-    assert "数据时" not in names
-    assert "过来" not in names
-
-
-def test_functional_preserves_full_name_under_condense():
-    from narrativeloom.utils.display_utils import condense_role_body
-
-    body = "- 方岩坦：四十五岁副教授，韩星的研究导师"
-    out = condense_role_body(body, max_lines=2, max_chars=44)
-    assert "方岩坦" in out
-    assert out.startswith("- 方岩坦")
+- 朱塞佩撞见狗剩作画，玛利亚出面调解
+- 朱塞佩与狗剩争执颜料""",
+            {"达芬奇·狗剩", "朱塞佩", "玛利亚"},
+            {"到朱塞佩", "星假装没", "交换"},
+        ),
+        (
+            "艾买提在克拉玛依老炼油厂整理车间。",
+            ["艾买提"],
+            2,
+            """【设定构建师】
+- 地点：炼油厂
+【人物塑造师】
+- 艾买提：师傅
+- 神圣构图：占位
+【剧情逻辑师】
+- 艾买提清理车间时发现笔记，韩星假借采访接近""",
+            {"艾买提", "韩星"},
+            {"神圣构图", "生存现实", "理车间时"},
+        ),
+    ]
+    for seed, locked, target, raw, must_have, must_not in cases:
+        out = _coerce_unified_plan_variants(
+            [{"outline": raw}],
+            plan_count=1,
+            feedback_process=False,
+            locked_character_names=locked,
+            character_target_total=target,
+            role_names=["设定构建师", "人物塑造师", "剧情逻辑师"],
+            seed=seed,
+        )[0]["outline"]
+        names = _sculptor_names(out)
+        assert len(names) == target, (seed, names)
+        for n in must_have:
+            assert n in names, (seed, n, names)
+        for bad in must_not:
+            assert bad not in names, (seed, bad, names)
