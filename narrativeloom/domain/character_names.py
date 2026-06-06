@@ -14,7 +14,31 @@ _REJECT_NAME_FRAG = re.compile(
     r"高潮|转折|节奏|情节|剧情|环境|世界|物理|空间|设定|承接|核查|连续|监控|检查|"
     r"氛围|道具|伏笔|因果|逻辑|对话|提醒|拓展|节点|抉择|样本|陈列|诚信|突破|原则|"
     r"严谨|务实|状态|动机|性格|师$|工程|计划$|程计划|"
-    r"队员$|教授$|工程师$|研究员$|研究生$|生命体$)"
+    r"队员$|教授$|工程师$|研究员$|研究生$|生命体$|"
+    r"透露|过来|任何|数据时|本节|主要人物)"
+)
+
+_PHRASE_NOT_NAME = frozenset(
+    {
+        "过来",
+        "过去",
+        "回来",
+        "上去",
+        "下来",
+        "进去",
+        "出去",
+        "上来",
+        "下去",
+        "进来",
+        "任何",
+        "数据时",
+        "透露任何",
+        "本节",
+        "主要",
+        "人物",
+        "本节主要",
+        "主要人物",
+    }
 )
 
 
@@ -75,6 +99,7 @@ _DESCRIPTOR_NAME = re.compile(
     r"^(沾满|戴着|戴圆|万物|炭灰|面粉|猪圈|模特|墙上|最后|晚餐|圆框|画笔|油彩|"
     r"双手|一手|一手|背景|前景|画面|构图|颜料|墙壁|墙皮|泥墙|"
     r"严谨|务实|当前|本节|状态|动机|性格|身份|任务|张力|高潮|转折|悬念|"
+    r"透露|过来|任何|数据|信息|保密|"
     r"核心|戏剧|情节|剧情|伏笔|主题|矛盾|冲突|节奏|"
     r"黎明|黄昏|清晨|午夜|正午|凌晨|傍晚|拂晓|深夜|白天|夜晚|上午|下午|中午|"
     r"周一|周二|周三|周四|周五|周六|周日|周天|"
@@ -164,6 +189,17 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
     """时间点、星期片段、器物/环境词、设备名、抽象主题词等，不得当作人物姓名。"""
     n = (name or "").strip()
     if not n:
+        return True
+    if n in _PHRASE_NOT_NAME:
+        return True
+    if n.endswith("任何") or n.startswith("透露"):
+        return True
+    if re.match(r"^(过来|过去|回来|上来|下去|进来|出去)$", n):
+        return True
+    if len(n) <= 5 and re.match(r"^(数据|信息|保密|透露|本节|主要|关键|剧情)", n):
+        return True
+    blob = f"{n}\n{context or ''}"
+    if re.search(r"不得透露任何|透露任何|保密条例", blob) and n in ("透露任何", "任何", "透露"):
         return True
     if _DEVICE_OR_MACHINE.search(n):
         return True
@@ -723,7 +759,11 @@ def _build_sculptor_allowlist(
     for raw in extract_cast_from_narrative(plot_cross, limit=12):
         resolved = _resolve_cast_name(raw, anchors, context=plot_cross) or raw
         clean = _scrub_cast_name(resolved, allow, context=plot_cross) or resolved
-        if clean and clean not in allow:
+        if (
+            clean
+            and clean not in allow
+            and not is_false_person_name(clean, context=f"{clean}\n{plot_cross}")
+        ):
             allow.append(clean)
     for a in list(anchors):
         for part in re.split(r"[·．\.]", a):

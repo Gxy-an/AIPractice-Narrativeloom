@@ -326,18 +326,17 @@ def sanitize_typified_characters(
     prior_profiles = parse_character_profile_map(prior_characters_block)
     target = max(2, min(int(target), 8))
     global_cast = merge_unique_names(list(global_cast_names or []), locked)
-    allow_set: set[str] = set(global_cast)
+    plot_allow = _build_sculptor_allowlist(
+        seed=seed,
+        locked_names=locked,
+        plot_sources=[key_events],
+        setting_context=setting,
+        body=raw,
+    )
+    allow_set: set[str] = set(global_cast) | set(locked) | set(plot_allow)
     if strict_narrative_allowlist:
-        allowlist = _build_sculptor_allowlist(
-            seed=seed,
-            locked_names=locked,
-            plot_sources=[key_events],
-            setting_context=setting,
-            body=raw,
-        )
+        allowlist = plot_allow
         allow_set = set(allowlist) | set(locked) | set(global_cast)
-    elif global_cast:
-        allow_set = set(global_cast)
     raw_map: Dict[str, str] = {}
     for entry in _split_character_entries(raw):
         line = entry.lstrip("-·• ").strip()
@@ -383,6 +382,27 @@ def sanitize_typified_characters(
         _push(name, desc)
 
     cast_names = [n for n, _ in kept]
+
+    def _fill_from_plot_allowlist() -> None:
+        nonlocal cast_names
+        ranked = _sort_allowlist_by_plot(
+            _filter_allowlist_subnames(allow_set), key_events
+        )
+        for candidate in ranked:
+            if len(cast_names) >= target:
+                break
+            if candidate in seen:
+                continue
+            if _is_subname_of_compound_cast(candidate, locked + cast_names):
+                continue
+            before = len(kept)
+            _push(candidate, raw_map.get(candidate, ""))
+            if len(kept) > before:
+                cast_names = [n for n, _ in kept]
+
+    _fill_from_plot_allowlist()
+
+    cast_names = [n for n, _ in kept]
     while len(cast_names) < target:
         extra = ""
         if global_cast:
@@ -407,6 +427,21 @@ def sanitize_typified_characters(
             extra = _fallback_supplementary_name(
                 cast_names, full=context, seed=seed, narrative=plot_context
             )
+        if not extra and strict_narrative_allowlist:
+            from narrativeloom.domain.character_names import extract_cast_from_narrative
+
+            plot_context = f"{seed}\n{setting}\n{key_events}"
+            for candidate in extract_cast_from_narrative(plot_context, limit=12):
+                resolved = _resolve_cast_name(candidate, locked, context=context) or candidate
+                clean = _scrub_cast_name(resolved, cast_names, context=context) or resolved
+                if (
+                    clean
+                    and clean not in cast_names
+                    and (clean in allow_set or resolved in allow_set)
+                    and not is_false_person_name(clean, context=f"{clean}\n{context}")
+                ):
+                    extra = clean
+                    break
         if not extra or extra in cast_names:
             break
         before = len(kept)
@@ -2615,6 +2650,24 @@ def abbreviate_established_sections(
     return body
 
 
+def _condense_character_line(s: str, max_chars: int) -> str:
+    """压缩人物行时只截断描述，保留完整姓名。"""
+    probe = s.strip()
+    if "：" in probe or ":" in probe:
+        probe = probe.replace(":", "：")
+        name, _, desc = probe.partition("：")
+        name = name.strip()
+        desc = desc.strip()
+        if name and desc:
+            budget = max(8, max_chars - len(name) - 1)
+            if len(desc) > budget:
+                desc = desc[:budget]
+            return f"{name}：{desc}"
+    if len(probe) > max_chars:
+        return probe[:max_chars]
+    return probe
+
+
 def condense_role_body(
     body: str,
     *,
@@ -2634,7 +2687,7 @@ def condense_role_body(
         if truncate and len(s) > max_chars:
             s = s[: max_chars - 1] + "…"
         elif len(s) > max_chars:
-            s = s[:max_chars]
+            s = _condense_character_line(s, max_chars)
         out.append(f"- {s}")
         if len(out) >= max_lines:
             break

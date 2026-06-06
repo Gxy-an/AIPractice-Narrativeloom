@@ -632,3 +632,78 @@ def test_functional_coerce_respects_global_cast():
     assert "交换" not in names
     assert "星假装没" not in names
     assert "关键剧情人物" not in out
+
+
+def test_is_false_person_name_rejects_phrase_fragments():
+    from narrativeloom.domain.character_names import is_false_person_name
+
+    for bad in ("透露任何", "过来", "数据时", "任何"):
+        assert is_false_person_name(bad, context="不得透露任何信息")
+
+
+def test_sanitize_typified_enforces_exact_target_count():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    raw = (
+        "- 陈默：导师，地质学家\n"
+        "- 林星：研究生助手\n"
+        "- 奇拉：沙虫信使"
+    )
+    plot = "阿依夏在监控室呼叫赵工，陈默与林星赶到深井"
+    out = sanitize_typified_characters(
+        raw,
+        target=4,
+        locked_names=[],
+        seed="克拉玛依深井",
+        setting="公元2147年克拉玛依地下城",
+        key_events=plot,
+        global_cast_names=["陈默", "林星", "阿依夏", "赵工"],
+    )
+    names = _sculptor_names("【人物塑造师】\n" + out)
+    assert len(names) == 4
+    assert "透露任何" not in names
+    assert "过来" not in names
+
+
+def test_functional_syncs_plot_cast_and_rejects_phrase_names():
+    from narrativeloom.service.llm_client import _coerce_unified_plan_variants
+
+    seed = "艾克拜尔在克拉玛依地质勘探队实习。"
+    raw = """【设定构建师】
+- 地点：克拉玛依郊外深地实验室
+- 时间：2189年下午
+【人物塑造师】
+- 陈洛：初级数据分析员
+- 透露任何：本节主要人物，行动推动当前情节
+- 数据时：青年研究员
+【剧情逻辑师】
+- 陈洛发现次声波记录中的节律脉冲
+- 阿依夏姆把陈洛叫到办公室，讨论硅基生命体
+【冲突设计师】
+- 核心冲突：科学好奇与安全审查
+- 戏剧冲突：阿依夏姆赌上学术声誉"""
+    out = _coerce_unified_plan_variants(
+        [{"outline": raw}],
+        plan_count=1,
+        feedback_process=False,
+        locked_character_names=["艾克拜尔"],
+        character_target_total=3,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
+        seed=seed,
+    )[0]["outline"]
+    names = _sculptor_names(out)
+    assert len(names) == 3
+    assert "陈洛" in names
+    assert "阿依夏姆" in names
+    assert "透露任何" not in names
+    assert "数据时" not in names
+    assert "过来" not in names
+
+
+def test_functional_preserves_full_name_under_condense():
+    from narrativeloom.utils.display_utils import condense_role_body
+
+    body = "- 方岩坦：四十五岁副教授，韩星的研究导师"
+    out = condense_role_body(body, max_lines=2, max_chars=44)
+    assert "方岩坦" in out
+    assert out.startswith("- 方岩坦")
