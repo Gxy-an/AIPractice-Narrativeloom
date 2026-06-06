@@ -37,13 +37,17 @@ def build_chunks_from_beats(beat_texts: List[str], max_chunk_chars: int = 900) -
     return chunks
 
 
-def canon_sheet_from_beats(beats: List, *, background_prefix: str = "") -> str:
+def canon_sheet_from_beats(beats: List, *, background_prefix: str = "", global_cast_block: str = "") -> str:
     """从已选节拍汇总「设定清单」：人物与地点线索，强制模型沿用。可选前置背景纲要。"""
     lines: List[str] = []
     bp = (background_prefix or "").strip()
     if bp:
         lines.append("【创作背景（须遵守）】")
         lines.append(bp[:4000])
+        lines.append("")
+    gcb = (global_cast_block or "").strip()
+    if gcb:
+        lines.append(gcb)
         lines.append("")
     names: List[str] = []
     locs: List[str] = []

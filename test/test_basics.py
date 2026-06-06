@@ -566,3 +566,69 @@ def test_normalize_typified_key_events_respects_length_and_total_cap():
     assert 3 <= len(lines) <= 5
     assert all(30 <= len(ln) <= 50 for ln in lines)
     assert sum(len(ln) for ln in lines) <= 300
+
+
+def test_structured_cast_split_on_ampersand():
+    from narrativeloom.domain.global_character_list import names_from_structured_characters_field
+
+    raw = "韩星：记者 & 艾买提：师傅 & 交换：无效"
+    names = names_from_structured_characters_field(raw)
+    assert "韩星" in names
+    assert "艾买提" in names
+    assert "交换" not in names
+
+
+def test_extract_character_names_from_text_ignores_prose_ner():
+    from narrativeloom.utils.display_utils import extract_character_names_from_text
+
+    prose = "交换发生在集市，老僧的警言回荡，星假装没听见韩星的呼唤。"
+    assert extract_character_names_from_text(prose) == []
+
+
+def test_sanitize_typified_uses_global_cast_not_prose_garbage():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    raw = "- 交换：市场从业者\n- 老僧的警：警告者\n- 星假装没：关键剧情人物"
+    out = sanitize_typified_characters(
+        raw,
+        target=2,
+        locked_names=["韩星"],
+        seed="韩星在集市采访",
+        global_cast_names=["韩星", "艾买提"],
+    )
+    assert "交换" not in out
+    assert "老僧的警" not in out
+    assert "星假装没" not in out
+    assert "韩星" in out
+
+
+def test_functional_coerce_respects_global_cast():
+    from narrativeloom.service.llm_client import _coerce_unified_plan_variants
+
+    seed = "韩星在克拉玛依采访。"
+    raw = """【设定构建师】
+- 地点：克拉玛依
+- 时间：2024年秋
+【人物塑造师】
+- 交换：市场从业者
+- 星假装没：关键剧情人物
+【剧情逻辑师】
+- 韩星假借采访接近艾买提
+【冲突设计师】
+- 核心矛盾：信任与隐瞒"""
+    out = _coerce_unified_plan_variants(
+        [{"outline": raw}],
+        plan_count=1,
+        feedback_process=False,
+        locked_character_names=["韩星"],
+        character_target_total=2,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
+        seed=seed,
+        global_cast_names=["韩星", "艾买提"],
+    )[0]["outline"]
+    names = _sculptor_names(out)
+    assert "韩星" in names
+    assert "艾买提" in names
+    assert "交换" not in names
+    assert "星假装没" not in names
+    assert "关键剧情人物" not in out

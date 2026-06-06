@@ -842,6 +842,8 @@ def generate_typified_beat(
     beat_index: int = 0,
     num_sections: int = 6,
     character_target_total: Optional[int] = None,
+    global_cast_names: Optional[List[str]] = None,
+    global_cast_prompt: str = "",
 ) -> Dict[str, Any]:
     cfg = _cfg_or_env(llm_cfg)
     locked = merge_unique_names(
@@ -918,6 +920,8 @@ def generate_typified_beat(
                 + prior_characters_block.strip()[:2000]
                 + "\n"
             )
+        if (global_cast_prompt or "").strip():
+            user += "\n" + global_cast_prompt.strip()[:2400] + "\n"
         if locked_txt:
             user += f"\nLOCKED NAMES (must all appear in characters, unchanged spelling): {locked_txt}\n"
         seed_cast = extract_seed_cast_names(seed)
@@ -947,7 +951,8 @@ def generate_typified_beat(
             "因果清晰、避免空泛套话与口号式描写。"
             "【篇幅】三字段中文总字数（不含空白）约 300～420 字；信息密度高但避免长篇散文。"
             "setting：仅一行，写清时间+地点（约 30～55 字）。"
-            f"characters：{char_spec_zh}，每行以「- 」开头，格式「姓名：身份/关系/本节行动」（每行 12～28 字，精炼短句，禁止年龄履历式长传记）。"
+            f"characters：{char_spec_zh}，每行以「- 」开头，格式「姓名：身份/关系/本节行动」（每行 12～28 字，精炼短句，禁止年龄履历式长传记）；"
+            "多名配角可用 & 连接；须优先使用全局角色清单正式姓名，禁止无原因改名；新增人物须在 key_events 写明登场。"
             f"key_events：{ke_spec}，每行以「- 」开头，"
             f"每条 {TYPIFIED_KEY_EVENT_CHARS_MIN}～{TYPIFIED_KEY_EVENT_CHARS_MAX} 字，"
             "写具体动作、冲突或转折，须明显推动本节情节向前，鼓励意外与画面感。"
@@ -989,6 +994,8 @@ def generate_typified_beat(
                 + prior_characters_block.strip()[:2000]
                 + "\n"
             )
+        if (global_cast_prompt or "").strip():
+            user += "\n" + global_cast_prompt.strip()[:2400] + "\n"
         if locked_txt:
             user += f"\n【锁定姓名（characters 中必须全部出现，拼写不变）】{locked_txt}\n"
         seed_cast = extract_seed_cast_names(seed)
@@ -1073,6 +1080,7 @@ def generate_typified_beat(
         setting=str(data.get("setting", "")),
         key_events=str(data.get("key_events", "")),
         prior_characters_block=prior_characters_block,
+        global_cast_names=merge_unique_names(list(global_cast_names or []), locked),
     )
     if not typified_characters_meaningful(data.get("characters")) and (data.get("setting") or "").strip():
         data["characters"] = "- （待补全人物）"
@@ -1107,6 +1115,7 @@ def _coerce_unified_plan_variants(
     beat_index: int = 0,
     seed: str = "",
     prior_character_profiles: Optional[Dict[str, str]] = None,
+    global_cast_names: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     locked = merge_unique_names(
         [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
@@ -1129,6 +1138,7 @@ def _coerce_unified_plan_variants(
                 beat_index=beat_index,
                 seed=seed,
                 prior_character_profiles=prior_character_profiles,
+                global_cast_names=global_cast_names,
             )
             expanded.append({"outline": normalized, "process_feedback": pf if feedback_process else None})
             if len(expanded) >= plan_count:
@@ -1309,6 +1319,8 @@ def generate_unified_functional_plans(
     locked_setting_baseline: str = "",
     num_sections: int = 6,
     prior_characters_block: str = "",
+    global_cast_names: Optional[List[str]] = None,
+    global_cast_prompt: str = "",
 ) -> Dict[str, Any]:
     """一次统筹全部职能，返回 plan_count 个完整小节总体方案（含【职能】分块）。"""
     cfg = _cfg_or_env(llm_cfg)
@@ -1462,6 +1474,8 @@ def generate_unified_functional_plans(
         user += f"\n【设定清单】\n{(canon_sheet or '')[:2000]}\n"
     if rag_excerpt:
         user += f"\n【相关摘录】\n{(rag_excerpt or '')[:1500]}\n"
+    if (global_cast_prompt or "").strip():
+        user += "\n" + global_cast_prompt.strip()[:2400] + "\n"
     if locked_setting_baseline.strip():
         user += (
             f"\n【锁定时空设定（四案必须共用，仅可微调细节，禁止换场景/时代/世界观）】\n"
@@ -1521,6 +1535,7 @@ def generate_unified_functional_plans(
         beat_index=beat_index,
         seed=seed,
         prior_character_profiles=prior_profiles,
+        global_cast_names=merge_unique_names(list(global_cast_names or []), locked),
     )
     return {"_mode": "unified", "variants": coerced}
 

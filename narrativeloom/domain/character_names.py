@@ -193,6 +193,12 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
         return True
     if re.match(r"^[假借][采访访]", n) or n in ("间时", "假采访", "假借访"):
         return True
+    if n in ("交换", "交易", "贸易", "警", "警告", "提醒"):
+        return True
+    if re.search(r"的(警|诫|告|符|兆|意|图|线|点)$", n):
+        return True
+    if re.search(r"假装|装作|佯装", n):
+        return True
     if _DESCRIPTOR_NAME.search(n):
         return True
     blob = f"{n}\n{context or ''}"

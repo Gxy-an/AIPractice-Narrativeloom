@@ -272,30 +272,26 @@ def _assemble_all_beats_text(lg: str, n: int) -> str:
 
 def _locked_character_names(beat_idx: int, lg: str) -> List[str]:
     """前文、背景与创意种子中已登场/既定人物（只增不减）。"""
-    from narrativeloom.domain.character_names import extract_seed_cast_names
+    return _global_character_list(beat_idx, lg).names
 
-    lists: List[List[str]] = []
-    seed = (st.session_state.get("seed") or "").strip()
-    if seed:
-        lists.append(extract_seed_cast_names(seed))
-    bg = (st.session_state.get("background_characters") or "").strip()
-    if bg:
-        lists.append(extract_character_names_from_text(bg))
-    for i in range(beat_idx):
-        b = st.session_state.beats[i]
-        if not isinstance(b, dict):
-            continue
-        if b.get("mode") == "typified":
-            ch = (b.get("characters") or "").strip()
-            if ch:
-                lists.append(extract_character_names_from_text(ch))
-        else:
-            merged = (b.get("merged") or "").strip()
-            if merged:
-                lists.append(
-                    extract_character_names_from_text(merged, sculptor_sections_only=True)
-                )
-    return merge_unique_character_names(*lists)
+
+def _global_character_list(beat_idx: int, lg: str):
+    from narrativeloom.domain.global_character_list import build_global_character_list
+
+    return build_global_character_list(
+        seed=(st.session_state.get("seed") or "").strip(),
+        background=(st.session_state.get("background_characters") or "").strip(),
+        prior_beats=st.session_state.beats[:beat_idx],
+        lang=lg,
+    )
+
+
+def _global_cast_prompt(beat_idx: int, lg: str) -> str:
+    return _global_character_list(beat_idx, lg).format_for_prompt(lg)
+
+
+def _global_cast_names(beat_idx: int, lg: str) -> List[str]:
+    return _global_character_list(beat_idx, lg).names
 
 
 def _extract_setting_baseline(outline: str) -> str:
@@ -490,15 +486,22 @@ def _llm_cfg_fingerprint(cfg: Dict[str, Any]) -> str:
 def _rag_bundle(idx: int, labels: List[Tuple[str, str]], *, typified: bool = False) -> Tuple[str, str]:
     lg = _lg()
     prior_beats = [st.session_state.beats[i] for i in range(max(0, idx))]
-    canon = canon_sheet_from_beats(prior_beats, background_prefix=_body_canon_prefix())
+    gcl = _global_character_list(idx, lg)
+    global_block = gcl.format_for_prompt(lg)
+    canon = canon_sheet_from_beats(
+        prior_beats,
+        background_prefix=_body_canon_prefix(),
+        global_cast_block=global_block,
+    )
     if typified and idx <= 0:
         return canon[:1200] if canon else "", ""
     texts = [_beat_to_text(st.session_state.beats[i], lg) for i in range(idx)]
     chunks = build_chunks_from_beats([t for t in texts if t.strip()])
     title, hint = labels[idx]
     tail = "\n".join(texts[-3:] if typified else texts[-5:]) if texts else ""
+    cast_hint = "、".join(gcl.names[:24]) if gcl.names else ""
     cap = 2000 if typified else 3200
-    query = f"{st.session_state.seed}\n{tail}\n{title}\n{hint}\n{canon}"[:cap]
+    query = f"{st.session_state.seed}\n{tail}\n{title}\n{hint}\n{cast_hint}\n{canon}"[:cap]
     top_k = 2 if typified else 4
     rag = retrieve_context(query=query, chunks=chunks, top_k=top_k)
     if typified and rag:
@@ -547,6 +550,8 @@ def _parallel_typified(
     prior = _prior_summary(beat_idx, labels, lang)
     locked_chars = _locked_character_names(beat_idx, lang)
     prior_chars = _prior_characters_block(beat_idx, labels, lang) if beat_idx > 0 else ""
+    global_cast_prompt = _global_cast_prompt(beat_idx, lang)
+    global_cast_names = _global_cast_names(beat_idx, lang)
     char_target = int(
         st.session_state.get(
             f"typ_char_total_{beat_idx}",
@@ -582,6 +587,8 @@ def _parallel_typified(
                     beat_index=beat_idx,
                     num_sections=len(labels),
                     character_target_total=char_target,
+                    global_cast_names=global_cast_names,
+                    global_cast_prompt=global_cast_prompt,
                 )
             except Exception as e:  # noqa: BLE001
                 last_err = e
@@ -663,6 +670,8 @@ def _generate_unified_functional(
         prior_beat_homogeneity_digest=homogeneity,
         locked_setting_baseline=st.session_state.get("fn_locked_setting") or "",
         prior_characters_block=prior_chars,
+        global_cast_names=_global_cast_names(beat_idx, lang),
+        global_cast_prompt=_global_cast_prompt(beat_idx, lang),
     )
 
 

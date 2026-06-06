@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 _MUT_OPEN = "⟦mut⟧"
 _MUT_CLOSE = "⟦/mut⟧"
@@ -307,24 +307,26 @@ def sanitize_typified_characters(
     key_events: str = "",
     prior_characters_block: str = "",
     strict_narrative_allowlist: bool = False,
+    global_cast_names: Optional[List[str]] = None,
 ) -> str:
     """过滤类型化 characters 中的非人物条目，补满目标人数。"""
     from narrativeloom.domain.character_names import (
         _build_sculptor_allowlist,
-        _fallback_supplementary_name,
         _is_subname_of_compound_cast,
         _resolve_cast_name,
         _scrub_cast_name,
         is_false_person_name,
         merge_unique_names,
     )
+    from narrativeloom.domain.global_character_list import fallback_name_from_global_cast
 
     raw = coerce_display_text(text).strip()
     context = f"{seed}\n{setting}\n{key_events}\n{raw}"
     locked = merge_unique_names(list(locked_names or []))
     prior_profiles = parse_character_profile_map(prior_characters_block)
     target = max(2, min(int(target), 8))
-    allow_set: set[str] = set()
+    global_cast = merge_unique_names(list(global_cast_names or []), locked)
+    allow_set: set[str] = set(global_cast)
     if strict_narrative_allowlist:
         allowlist = _build_sculptor_allowlist(
             seed=seed,
@@ -333,7 +335,9 @@ def sanitize_typified_characters(
             setting_context=setting,
             body=raw,
         )
-        allow_set = set(allowlist)
+        allow_set = set(allowlist) | set(locked) | set(global_cast)
+    elif global_cast:
+        allow_set = set(global_cast)
     raw_map: Dict[str, str] = {}
     for entry in _split_character_entries(raw):
         line = entry.lstrip("-·• ").strip()
@@ -379,11 +383,30 @@ def sanitize_typified_characters(
         _push(name, desc)
 
     cast_names = [n for n, _ in kept]
-    plot_context = f"{seed}\n{setting}\n{key_events}"
     while len(cast_names) < target:
-        extra = _fallback_supplementary_name(
-            cast_names, full=context, seed=seed, narrative=plot_context
-        )
+        extra = ""
+        if global_cast:
+            extra = fallback_name_from_global_cast(cast_names, global_cast, context=context)
+        if not extra and allow_set:
+            ranked = _sort_allowlist_by_plot(
+                _filter_allowlist_subnames(allow_set), key_events
+            )
+            for candidate in ranked:
+                if candidate in cast_names:
+                    continue
+                if _is_subname_of_compound_cast(candidate, locked + cast_names):
+                    continue
+                clean = _scrub_cast_name(candidate, cast_names, context=context)
+                if clean and clean not in cast_names:
+                    extra = clean
+                    break
+        if not extra and not strict_narrative_allowlist:
+            from narrativeloom.domain.character_names import _fallback_supplementary_name
+
+            plot_context = f"{seed}\n{setting}\n{key_events}"
+            extra = _fallback_supplementary_name(
+                cast_names, full=context, seed=seed, narrative=plot_context
+            )
         if not extra or extra in cast_names:
             break
         before = len(kept)
@@ -394,6 +417,28 @@ def sanitize_typified_characters(
 
     lines = [f"- {n}：{d}" for n, d in kept[:target]]
     return "\n".join(lines) if lines else raw
+
+
+def _filter_allowlist_subnames(candidates: Sequence[str]) -> List[str]:
+    """去掉被更长正式姓名包含的短片段（如 利亚 ⊂ 玛利亚）。"""
+    uniq = list(dict.fromkeys(c for c in candidates if c))
+    out: List[str] = []
+    for n in sorted(uniq, key=len, reverse=True):
+        if any(n != m and n in m for m in uniq):
+            continue
+        out.append(n)
+    return out
+
+
+def _sort_allowlist_by_plot(candidates: Sequence[str], plot_text: str) -> List[str]:
+    plot = plot_text or ""
+    return sorted(
+        list(candidates),
+        key=lambda n: (
+            plot.find(n) if n in plot else 10_000,
+            -len(n),
+        ),
+    )
 
 
 def key_events_to_bullets(text: Any) -> str:
@@ -1710,9 +1755,20 @@ def _names_from_bullet_lines(text: str) -> List[str]:
 
 
 def extract_character_names_from_text(text: str, *, sculptor_sections_only: bool = False) -> List[str]:
-    from narrativeloom.domain.character_names import extract_character_names
+    """Layer 1：仅从结构化 characters / 人物塑造师字段提取，不扫描散文正文。"""
+    from narrativeloom.domain.global_character_list import (
+        names_from_functional_outline,
+        names_from_structured_characters_field,
+    )
 
-    return extract_character_names(text, sculptor_sections_only=sculptor_sections_only)
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    if "【" in raw:
+        if sculptor_sections_only:
+            return names_from_functional_outline(raw)
+        return names_from_functional_outline(raw)
+    return names_from_structured_characters_field(raw)
 
 
 def merge_unique_character_names(*name_lists: List[str]) -> List[str]:
@@ -2393,6 +2449,7 @@ def complete_sculptor_body(
     sculpt_target: int = 2,
     seed: str = "",
     prior_character_profiles: Optional[Dict[str, str]] = None,
+    global_cast_names: Optional[List[str]] = None,
 ) -> str:
     plot = list(plot_sources or [])
     plot_blob = _plot_narrative_for_cast(plot)
@@ -2411,6 +2468,7 @@ def complete_sculptor_body(
         key_events=plot_blob,
         prior_characters_block=prior_block,
         strict_narrative_allowlist=True,
+        global_cast_names=global_cast_names,
     )
     return scrub_functional_fragment(out)
 
@@ -2608,6 +2666,7 @@ def normalize_single_unified_outline(
     beat_index: int = 0,
     seed: str = "",
     prior_character_profiles: Optional[Dict[str, str]] = None,
+    global_cast_names: Optional[List[str]] = None,
 ) -> str:
     """清洗单份总体方案：截断杂糅、补全人物塑造师、规范分块。"""
     txt = scrub_functional_fragment(strip_trailing_json_leak(unescape_display_text(text)))
@@ -2675,6 +2734,7 @@ def normalize_single_unified_outline(
                 sculpt_target=sculpt_target,
                 seed=seed,
                 prior_character_profiles=prior_character_profiles,
+                global_cast_names=global_cast_names,
             )
             if beat_index > 0:
                 body = abbreviate_established_sections(
