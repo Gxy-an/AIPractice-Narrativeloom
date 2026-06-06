@@ -44,3 +44,41 @@ def test_extract_seed_cast_compound_name():
     seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》，模特是十二头猪"
     names = extract_seed_cast_names(seed)
     assert "达芬奇·狗剩" in names
+
+
+def test_complete_sculptor_section_rejects_garbage_and_keeps_seed():
+    from narrativeloom.domain.character_names import complete_sculptor_section
+
+    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》，模特是十二头猪。"
+    bad_body = "- 沾满面粉：严谨务实的画家\n- 炭灰：猪圈里的旁观者"
+    locked = extract_seed_cast_names(seed)
+    out = complete_sculptor_section(
+        bad_body,
+        plot_sources=["猪圈墙上，沾满面粉的手在画"],
+        locked_names=locked,
+        target=2,
+        seed=seed,
+    )
+    assert "达芬奇·狗剩" in out
+    assert "沾满面粉" not in out
+    assert "炭灰" not in out
+
+
+def test_normalize_unified_outline_preserves_seed_protagonist():
+    from narrativeloom.utils.display_utils import normalize_single_unified_outline
+
+    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》，模特是十二头猪。"
+    raw = (
+        "【设定构建师】\n- 地点：猪圈\n- 时间：午后\n"
+        "【人物塑造师】\n- 沾满面粉：画家\n- 炭灰：旁观者\n"
+        "【剧情逻辑师】\n- 狗剩在墙上作画"
+    )
+    out = normalize_single_unified_outline(
+        raw,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师"],
+        locked_names=["达芬奇·狗剩"],
+        character_target_total=2,
+        seed=seed,
+    )
+    assert "达芬奇·狗剩" in out
+    assert "沾满面粉" not in out

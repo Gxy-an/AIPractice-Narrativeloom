@@ -1757,6 +1757,7 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                                     st.session_state.get(f"_fc_char_target_{idx}", char_default)
                                 ),
                                 beat_index=idx,
+                                seed=st.session_state.get("seed") or "",
                             )
                             user_edited = 1 if mt != (default_outline or "").strip() else 0
                             pick_i = int(st.session_state.get(unified_plan_pick_key(idx), plan_i))

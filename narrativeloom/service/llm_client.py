@@ -1060,6 +1060,7 @@ def _coerce_unified_plan_variants(
     character_target_total: Optional[int] = None,
     role_names: Optional[List[str]] = None,
     beat_index: int = 0,
+    seed: str = "",
 ) -> List[Dict[str, Any]]:
     locked = [n.strip() for n in (locked_character_names or []) if (n or "").strip()]
     sculpt_target = character_target_total if character_target_total is not None else max(2, len(locked))
@@ -1077,6 +1078,7 @@ def _coerce_unified_plan_variants(
                 locked_names=locked,
                 character_target_total=sculpt_target,
                 beat_index=beat_index,
+                seed=seed,
             )
             expanded.append({"outline": normalized, "process_feedback": pf if feedback_process else None})
             if len(expanded) >= plan_count:
@@ -1463,6 +1465,7 @@ def generate_unified_functional_plans(
         character_target_total=sculpt_target,
         role_names=role_names,
         beat_index=beat_index,
+        seed=seed,
     )
     return {"_mode": "unified", "variants": coerced}
 
@@ -1562,7 +1565,10 @@ def generate_functional_variants(
 ) -> Dict[str, Any]:
     """单次调用返回恰好 3 个 variant，降低请求次数与卡顿。"""
     cfg = _cfg_or_env(llm_cfg)
-    locked = [n.strip() for n in (locked_character_names or []) if (n or "").strip()]
+    locked = merge_unique_names(
+        [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
+        extract_seed_cast_names(seed),
+    )
     sculpt = is_character_sculptor_role(role_name, lang)
     gen_temp = 0.93 if sculpt else 0.88
     sculpt_target = (
@@ -1757,6 +1763,7 @@ def generate_functional_variants(
                 item.get("fragment") or "",
                 target_total=sculpt_target,
                 locked_names=locked,
+                seed=seed,
             )
     return {"variants": coerced}
 

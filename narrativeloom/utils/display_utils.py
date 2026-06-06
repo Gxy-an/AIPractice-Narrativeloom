@@ -1179,14 +1179,21 @@ def _finalize_sculptor_name(name: str, *, context: str = "") -> str:
 
 def _normalize_sculptor_line_name(name: str, *, context: str = "") -> str:
     """人物塑造师展示用姓名：严格规整 + 剧情并列名放宽。"""
-    fin = _finalize_sculptor_name(name, context=context)
+    raw = (name or "").strip()
+    from narrativeloom.domain.character_names import _is_locked_cast_name, _is_seed_cast_name
+
+    if _is_seed_cast_name(raw, context=context):
+        return raw
+    fin = _finalize_sculptor_name(raw, context=context)
     if fin:
         return fin
-    n = _strip_glued_verb_from_name((name or "").strip())
+    n = _strip_glued_verb_from_name(raw)
     if not n:
         return ""
     from narrativeloom.domain.character_names import _is_loose_cast_name
 
+    if _is_locked_cast_name(n, context=context):
+        return n
     return n if _is_loose_cast_name(n, context=context) else ""
 
 
@@ -1286,6 +1293,10 @@ def _is_pure_person_name(name: str) -> bool:
     n = _normalize_extracted_name((name or "").strip())
     if not n:
         return False
+    from narrativeloom.domain.character_names import _is_compound_cast_name
+
+    if _is_compound_cast_name(n):
+        return True
     canonical = _canonical_person_name(n)
     if canonical != n:
         return False
@@ -1334,6 +1345,13 @@ def _is_valid_sculptor_person_line(name: str, description: str) -> bool:
     n = _canonical_person_name((name or "").strip())
     if _is_setting_field_label(n) or n.upper() in _EN_NAME_BLOCK:
         return False
+    from narrativeloom.domain.character_names import _DESCRIPTOR_NAME, _is_seed_cast_name
+
+    if _DESCRIPTOR_NAME.search(n):
+        return False
+    if _is_seed_cast_name(n, context=f"{n}\n{description}"):
+        desc = (description or "").strip()
+        return bool(desc) and len(desc) >= 2
     if not _is_pure_person_name(n):
         return False
     desc = (description or "").strip()
@@ -1357,6 +1375,7 @@ def filter_character_sculptor_fragment(
     *,
     target_total: Optional[int] = None,
     locked_names: Optional[List[str]] = None,
+    seed: str = "",
 ) -> str:
     from narrativeloom.domain.character_names import filter_sculptor_fragment
 
@@ -1364,6 +1383,7 @@ def filter_character_sculptor_fragment(
         fragment,
         target_total=target_total,
         locked_names=locked_names,
+        seed=seed,
     )
 
 
@@ -2051,6 +2071,7 @@ def complete_sculptor_body(
     setting_sources: Optional[List[str]] = None,
     locked_names: Optional[List[str]] = None,
     sculpt_target: int = 2,
+    seed: str = "",
 ) -> str:
     from narrativeloom.domain.character_names import complete_sculptor_section
 
@@ -2062,6 +2083,7 @@ def complete_sculptor_body(
         setting_context=setting_blob,
         locked_names=locked_names,
         target=sculpt_target,
+        seed=seed,
     )
     return scrub_functional_fragment(out)
 
@@ -2250,6 +2272,7 @@ def normalize_single_unified_outline(
     locked_names: Optional[List[str]] = None,
     character_target_total: Optional[int] = None,
     beat_index: int = 0,
+    seed: str = "",
 ) -> str:
     """清洗单份总体方案：截断杂糅、补全人物塑造师、规范分块。"""
     txt = scrub_functional_fragment(strip_trailing_json_leak(unescape_display_text(text)))
@@ -2302,6 +2325,7 @@ def normalize_single_unified_outline(
                 setting_sources=setting_sources,
                 locked_names=locked,
                 sculpt_target=sculpt_target,
+                seed=seed,
             )
             if beat_index > 0:
                 body = abbreviate_established_sections(
@@ -2319,9 +2343,14 @@ def normalize_single_unified_outline(
                     name, _, desc = probe.lstrip("-·• ").partition("：")
                     if ":" in name and "：" not in name:
                         name, _, desc = probe.lstrip("-·• ").partition(":")
-                    name = _normalize_sculptor_line_name(name.strip(), context=name_ctx)
+                    name = _normalize_sculptor_line_name(name.strip(), context=f"{seed}\n{name_ctx}")
                     desc = sanitize_sculptor_description(desc)
-                    if name and desc:
+                    from narrativeloom.domain.character_names import _is_locked_cast_name
+
+                    if name and desc and (
+                        _is_locked_cast_name(name, locked=locked, context=f"{seed}\n{name_ctx}")
+                        or _is_valid_sculptor_person_line(name, desc)
+                    ):
                         lines_out.append(f"- {name}：{desc}")
                 else:
                     lines_out.append(s)

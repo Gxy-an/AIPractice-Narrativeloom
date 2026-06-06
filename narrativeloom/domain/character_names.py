@@ -37,8 +37,10 @@ def _valid_sculptor_entry(name: str, desc: str) -> bool:
     from narrativeloom.utils.display_utils import _is_valid_sculptor_person_line
 
     n = _canonical(name)
-    if not n or _REJECT_NAME_FRAG.search(n):
+    if not n or _REJECT_NAME_FRAG.search(n) or _DESCRIPTOR_NAME.search(n):
         return False
+    if _is_seed_cast_name(n, context=f"{n}\n{desc}"):
+        return bool((desc or "").strip()) and len((desc or "").strip()) >= 2
     return bool(_is_valid_sculptor_person_line(n, desc))
 
 
@@ -68,27 +70,55 @@ def _name_at_start(segment: str, *, context: str) -> str:
     return ""
 
 
-def _is_loose_cast_name(name: str, *, context: str = "") -> bool:
-    """剧情/冲突分块中的并列人名（如凯拉与雷欧），放宽至 2～4 字。"""
-    from narrativeloom.utils.display_utils import (
-        _BOGUS_NAME_PREFIX,
-        _STANDALONE_ROLE_LABEL,
-        _is_setting_field_label,
-        _strip_glued_verb_from_name,
-    )
+_DESCRIPTOR_NAME = re.compile(
+    r"^(沾满|戴着|戴圆|万物|炭灰|面粉|猪圈|模特|墙上|最后|晚餐|圆框|画笔|油彩|"
+    r"双手|一手|一手|背景|前景|画面|构图|颜料|墙壁|墙皮|泥墙|"
+    r"严谨|务实|当前|本节|状态|动机|性格|身份|任务|张力|高潮|转折|悬念|"
+    r"核心|戏剧|情节|剧情|伏笔|主题|矛盾|冲突|节奏|"
+    r"他|她|它|我|你|您|们|这|那|其|某|各|每|两|三|四|五|六|七|八|九|十|"
+    r"十二|一头|一头|一头猪|模特是)"
+)
 
-    n = _strip_glued_verb_from_name((name or "").strip())
-    if not n or len(n) < 2 or len(n) > 4:
+
+def _is_locked_cast_name(
+    name: str,
+    *,
+    locked: Optional[List[str]] = None,
+    context: str = "",
+) -> bool:
+    """锁定/种子既定人物：不受 2～4 字宽松规则与 strict 姓名字符集限制。"""
+    n = (name or "").strip()
+    if not n:
         return False
-    if _is_setting_field_label(n) or _BOGUS_NAME_PREFIX.match(n) or n in _STANDALONE_ROLE_LABEL:
+    for lk in locked or []:
+        if n == lk or lk.startswith(n) or n.startswith(lk):
+            return True
+    return _is_seed_cast_name(n, context=context)
+
+
+def _is_narrative_cast_candidate(name: str, *, context: str = "") -> bool:
+    """从叙事文本补人时用的较严规则：禁止把形容词/代词片段当人名。"""
+    n = (name or "").strip()
+    if not n or _REJECT_NAME_FRAG.search(n) or _DESCRIPTOR_NAME.search(n):
         return False
-    if _REJECT_NAME_FRAG.search(n):
-        return False
-    if re.search(r"(因果|戏剧|冲突|悬念|核心|突变|链|矛盾|阻碍|争执|必须|抉择)", n):
-        return False
+    if _is_compound_cast_name(n):
+        return True
+    if _is_seed_cast_name(n, context=context):
+        return True
     if _is_person(n):
         return True
+    if re.search(r"[·．\.]", n):
+        return False
+    if len(n) < 2 or len(n) > 4:
+        return False
+    if re.search(r"(的$|地$|得$|着$|了$|过$|在$|把$|被$|与$|和$|及$|或$)", n):
+        return False
     return bool(re.fullmatch(r"[\u4e00-\u9fff]{2,4}", n))
+
+
+def _is_loose_cast_name(name: str, *, context: str = "") -> bool:
+    """剧情并列中的短人名（兼容旧调用）；功能化补人请优先用 _is_narrative_cast_candidate。"""
+    return _is_narrative_cast_candidate(name, context=context)
 
 
 _DYAD_PAIR = re.compile(
@@ -262,19 +292,31 @@ _SEED_LEAD_ACTOR = re.compile(
 )
 
 
+def _is_compound_cast_name(name: str) -> bool:
+    """「达芬奇·狗剩」类复合名；纯结构判定，不调用 _is_person 以免与 display_utils 循环。"""
+    n = (name or "").strip()
+    if not n or not re.search(r"[·．\.]", n):
+        return False
+    parts = [p for p in re.split(r"[·．\.]", n) if p]
+    return bool(parts) and all(re.fullmatch(r"[\u4e00-\u9fffA-Za-z]+", p) for p in parts)
+
+
 def _is_seed_cast_name(name: str, *, context: str = "") -> bool:
     n = (name or "").strip()
     if not n or len(n) < 2 or len(n) > 24:
         return False
     if _REJECT_NAME_FRAG.search(n):
         return False
-    if re.search(r"[·．\.]", n):
-        parts = [p for p in re.split(r"[·．\.]", n) if p]
-        if parts and all(re.fullmatch(r"[\u4e00-\u9fffA-Za-z]+", p) for p in parts):
-            return True
-    if _is_person(n):
+    if _is_compound_cast_name(n):
         return True
-    return _is_loose_cast_name(n, context=context)
+    ctx = (context or "").strip()
+    if not ctx or n not in ctx:
+        return False
+    if _DESCRIPTOR_NAME.search(n):
+        return False
+    if re.match(rf"^{re.escape(n)}(?=[在将向对把被给让与和、，,。；：:\s]|$)", ctx):
+        return bool(re.fullmatch(r"[\u4e00-\u9fffA-Za-z]{2,12}", n))
+    return False
 
 
 def extract_seed_cast_names(text: str, *, limit: int = 6) -> List[str]:
@@ -396,47 +438,44 @@ def complete_sculptor_section(
     setting_context: str = "",
     locked_names: Optional[List[str]] = None,
     target: int = 2,
+    seed: str = "",
 ) -> str:
-    """补全人物塑造师：仅输出真实人物，人数对齐 target。"""
-    from narrativeloom.utils.display_utils import _scan_plot_name_candidates, extract_relation_names
+    """补全人物塑造师：优先种子/锁定人物，禁止从叙事误拆形容词当人名。"""
+    from narrativeloom.utils.display_utils import extract_relation_names
 
     narrative = "\n".join(s for s in (plot_sources or []) if (s or "").strip())
     extract_blob = f"{body}\n{narrative}".strip()
-    full = f"{extract_blob}\n{setting_context}".strip()
+    full = f"{seed}\n{extract_blob}\n{setting_context}".strip()
     target = max(1, min(int(target), 14))
-    locked = merge_unique_names(list(locked_names or []))
+    locked = merge_unique_names(list(locked_names or []), extract_seed_cast_names(seed))
 
     valid_lines = parse_colon_lines(body, context=full)
-    narrative_cast = _scan_plot_name_candidates(extract_blob, limit=max(target * 2, 12))
-    narrative_cast.extend(extract_relation_names(extract_blob))
-    dyads = _extract_dyads(extract_blob)
 
-    pool: List[str] = []
+    cast: List[str] = []
     for n in locked:
-        if n and (_is_person(n) or _is_loose_cast_name(n, context=full)) and n not in pool:
-            pool.append(n)
-    for n in list(valid_lines.keys()) + dyads + narrative_cast:
-        if n and (_is_person(n) or _is_loose_cast_name(n, context=full)) and n not in pool:
-            pool.append(n)
-    if len(pool) < target:
-        for n in _scan_plot_name_candidates(narrative, limit=max(target * 3, 20)):
-            if n and (_is_person(n) or _is_loose_cast_name(n, context=full)) and n not in pool:
-                pool.append(n)
-        for n in dyads:
-            if n not in pool:
-                pool.append(n)
-
-    cast = _coalesce_prefix_names(pool)[:target]
-    while len(cast) < target:
-        added = False
-        for n in _scan_plot_name_candidates(f"{narrative}\n{extract_blob}", limit=30) + dyads:
-            if n and (_is_person(n) or _is_loose_cast_name(n, context=full)) and n not in cast:
-                cast.append(n)
-                added = True
-                if len(cast) >= target:
-                    break
-        if not added:
+        if n and n not in cast:
+            cast.append(n)
+    for n in valid_lines.keys():
+        if len(cast) >= target:
             break
+        if n in cast:
+            continue
+        if _is_locked_cast_name(n, locked=locked, context=full) or _valid_sculptor_entry(
+            n, valid_lines[n].split("：", 1)[-1] if "：" in valid_lines[n] else ""
+        ):
+            cast.append(n)
+
+    if len(cast) < target:
+        for n in extract_seed_cast_names(full, limit=target) + extract_cast_from_narrative(
+            extract_blob, limit=target * 2
+        ):
+            if len(cast) >= target:
+                break
+            if n in cast:
+                continue
+            if _is_narrative_cast_candidate(n, context=full):
+                cast.append(n)
+
     cast = cast[:target]
 
     lines: List[str] = []
@@ -444,7 +483,7 @@ def complete_sculptor_section(
         picked = valid_lines.get(n)
         if not picked:
             for k, v in valid_lines.items():
-                if n.startswith(k) or k.startswith(n):
+                if n == k or n.startswith(k) or k.startswith(n):
                     picked = v
                     break
         if picked:
@@ -489,12 +528,14 @@ def filter_sculptor_fragment(
     *,
     target_total: Optional[int] = None,
     locked_names: Optional[List[str]] = None,
+    seed: str = "",
 ) -> str:
     target = max(2, int(target_total or 2))
-    locked = merge_unique_names(list(locked_names or []))
+    locked = merge_unique_names(list(locked_names or []), extract_seed_cast_names(seed))
     return complete_sculptor_section(
         fragment,
         plot_sources=[fragment],
         locked_names=locked,
         target=target,
+        seed=seed,
     )
