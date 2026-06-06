@@ -154,10 +154,14 @@ _DEVICE_OR_MACHINE = re.compile(
     r"终端机|处理器|计算机|服务器|执法器|巡逻机|机械|机甲|"
     r"装置|设备|仪器|器械|程序|系统|算法|型号|S-\d|Model)"
 )
+_ABSTRACT_THEME_NAME = re.compile(
+    r"^(神圣|生存|理想|现实|构图|逻辑|主题|命运|车间|清理|修理|理车|核心|戏剧|情节|剧情)?"
+    r"(构图|现实|逻辑|法则|隐喻|象征|主题|命运|矛盾|冲突|张力|生存|神圣|理想|现实|车间|时段)$"
+)
 
 
 def is_false_person_name(name: str, *, context: str = "") -> bool:
-    """时间点、星期片段、器物/环境词、设备名等，不得当作人物姓名。"""
+    """时间点、星期片段、器物/环境词、设备名、抽象主题词等，不得当作人物姓名。"""
     n = (name or "").strip()
     if not n:
         return True
@@ -165,6 +169,16 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
         return True
     if _is_compound_cast_name(n) or _is_seed_cast_name(n, context=context):
         return False
+    if _ABSTRACT_THEME_NAME.match(n):
+        return True
+    if re.search(r"车间", n) and len(n) <= 6:
+        return True
+    if re.match(r"^(个人|国家|社会|艺术|生存|理想|神圣|核心).{0,2}(安危|现实|矛盾|冲突|构图|逻辑)$", n):
+        return True
+    if len(n) >= 3 and re.search(r"(假|借|贷|问|说|看|听|走|跑|来|去|在|到|向|把|被|将|给|让|叫|请|想|能|会|可|应|该|须|需)$", n):
+        stem = n[:-1]
+        if stem and re.search(rf"{re.escape(stem)}[假借贷问说看听走来去到向把被将给让叫请想能会可应该须需]", context or n):
+            return True
     if n in _TIME_POINT_WORDS or _WEEKDAY_TIME_FRAGMENT.match(n):
         return True
     if len(n) == 3 and n[0] == "周" and n[2] in "上下":
@@ -172,6 +186,12 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
     if _OBJECT_LIKE_NAME.match(n):
         return True
     if n in ("墨水", "红墨", "颜料", "骨片", "银币"):
+        return True
+    if n in ("假借", "采访", "接近", "观察", "发现", "清理", "整理", "威胁", "调解"):
+        return True
+    if re.search(r"假借", n):
+        return True
+    if re.match(r"^[假借][采访访]", n) or n in ("间时", "假采访", "假借访"):
         return True
     if _DESCRIPTOR_NAME.search(n):
         return True
@@ -209,6 +229,7 @@ _SCENE_FRAGMENT = re.compile(
     r"乡村|城镇|城市|地区|场景|地点|时间|型号|系列|编号|"
     r"要毁|毁掉|毁颜|颜料|威胁|关键|剧情|本节|出场|行动|动机|"
     r"铁匠|管事|庄园|契约|墨水|红墨|网红|想借|借网|"
+    r"车间|清理|修理|时段|构图|神圣|生存|现实|"
     r"猪|网|红)"
 )
 
@@ -218,6 +239,10 @@ def _looks_like_scene_fragment(name: str) -> bool:
     if not n or _is_compound_cast_name(n):
         return False
     if len(n) >= 3 and n[-1] in "前后里外中内":
+        return True
+    if len(n) >= 4 and n.endswith("时") and not _is_person(n):
+        return True
+    if len(n) >= 3 and n.endswith("时") and re.search(r"(发现|清理|整理|修理|清理|采访|接近|观察)", n):
         return True
     return bool(_SCENE_FRAGMENT.search(n))
 
@@ -506,37 +531,85 @@ _VERB_AFTER_NAME = (
     "遇见",
     "见到",
     "出面",
+    "撞见",
     "调解",
     "撞见",
     "拿出",
     "掏出",
+    "假借",
+    "接近",
+    "采访",
+    "观察",
+    "监视",
+    "跟踪",
+    "砸碎",
 )
 _VERB_AFTER_NAME_RE = "|".join(
     sorted({re.escape(v) for v in _VERB_AFTER_NAME}, key=len, reverse=True)
 )
 
 
+_VERB_NAME_TAIL = (
+    "出面",
+    "撞见",
+    "看见",
+    "听见",
+    "调解",
+    "假借",
+    "采访",
+    "接近",
+    "观察",
+    "发现",
+    "清理",
+)
+
+
+def _strip_verbed_name_tail(name: str) -> str:
+    n = (name or "").strip()
+    for tail in sorted(_VERB_NAME_TAIL, key=len, reverse=True):
+        if n.endswith(tail) and len(n) > len(tail):
+            return n[: -len(tail)]
+    return n
+
+
 def _extract_verbed_cn_names(text: str, *, limit: int = 8) -> List[str]:
-    """剧情句中「朱塞佩看见…」「老周赶走…」类 2～4 字人名。"""
+    """剧情句中「朱塞佩看见…」「韩星假借…」类 2～4 字人名（动词锚定，避免误拆）。"""
     blob = text or ""
     if not blob:
         return []
-    patterns = (
-        rf"([\u4e00-\u9fff]{{2,4}})(?={_VERB_AFTER_NAME_RE})",
-        r"([\u4e00-\u9fff]{2,4})(?=见[\u4e00-\u9fff])",
-        r"(?:店主|掌柜|老板|管事|神父|铁匠)([\u4e00-\u9fff]{2,4})",
-        r"(?:与|和|对|向|叫|唤|令|让|帮|请|找)([\u4e00-\u9fff]{2,4})",
-    )
     found: List[str] = []
-    for pat in patterns:
-        for m in re.finditer(pat, blob):
-            n = (m.group(1) or "").strip()
-            if not n or not _is_narrative_cast_candidate(n, context=blob):
+    verbs = sorted(_VERB_AFTER_NAME, key=len, reverse=True)
+    for m in re.finditer("|".join(re.escape(v) for v in verbs), blob):
+        vstart = m.start()
+        if vstart < 2:
+            continue
+        picked = ""
+        for size in (4, 3, 2):
+            if vstart < size:
                 continue
-            if n not in found:
-                found.append(n)
-            if len(found) >= limit:
-                return found
+            name = blob[vstart - size : vstart]
+            if not re.fullmatch(r"[\u4e00-\u9fff]+", name):
+                continue
+            name = _strip_verbed_name_tail(name)
+            if not name or not _is_narrative_cast_candidate(name, context=blob):
+                continue
+            picked = name
+            break
+        if picked and picked not in found:
+            found.append(picked)
+        if len(found) >= limit:
+            break
+    for m in re.finditer(r"([\u4e00-\u9fff]{2,4})(?=见[\u4e00-\u9fff])", blob):
+        name = m.group(1)
+        if name.endswith(("撞", "听", "看")) and len(name) >= 3:
+            name = name[:-1]
+        name = _strip_verbed_name_tail(name)
+        if not name or not _is_narrative_cast_candidate(name, context=blob):
+            continue
+        if name not in found:
+            found.append(name)
+        if len(found) >= limit:
+            break
     return found
 
 
@@ -642,9 +715,10 @@ def _build_sculptor_allowlist(
         if n and n not in allow:
             allow.append(n)
     for raw in extract_cast_from_narrative(plot_cross, limit=12):
-        resolved = _resolve_cast_name(raw, anchors, context=plot_cross)
-        if resolved and resolved not in allow:
-            allow.append(resolved)
+        resolved = _resolve_cast_name(raw, anchors, context=plot_cross) or raw
+        clean = _scrub_cast_name(resolved, allow, context=plot_cross) or resolved
+        if clean and clean not in allow:
+            allow.append(clean)
     for a in list(anchors):
         for part in re.split(r"[·．\.]", a):
             if len(part) >= 2 and part in cross and a not in allow:
@@ -743,6 +817,10 @@ def _scrub_cast_name(name: str, existing: List[str], *, context: str = "") -> st
             canon = raw
     if not canon or re.fullmatch(r"配角\d+", canon):
         return ""
+    if len(canon) >= 4 and canon.endswith("出面"):
+        stem = canon[:-2]
+        if stem and _is_narrative_cast_candidate(stem, context=context):
+            canon = stem
     if is_false_person_name(canon, context=f"{canon}\n{context}"):
         return ""
     if _looks_like_scene_fragment(canon):
@@ -756,7 +834,35 @@ def _scrub_cast_name(name: str, existing: List[str], *, context: str = "") -> st
         return ""
     if _cast_name_collides(existing, canon):
         return ""
+    if _is_subname_of_compound_cast(canon, existing):
+        return ""
+    if len(canon) >= 3 and re.search(r"(假|借|贷)$", canon):
+        stem = canon[:-1]
+        if stem and re.search(rf"{re.escape(stem)}[假借贷]", context):
+            stem_canon = _normalize_sculptor_line_name(stem, context=context) or _canonical_person_name(stem)
+            if stem_canon and not is_false_person_name(stem_canon, context=f"{stem_canon}\n{context}"):
+                if not _cast_name_collides(existing, stem_canon) and not _is_subname_of_compound_cast(
+                    stem_canon, existing
+                ):
+                    return stem_canon
+            return ""
     return canon
+
+
+def _is_subname_of_compound_cast(name: str, anchors: List[str]) -> bool:
+    """复合名（如达芬奇·狗剩）的片段（狗剩）不得单独入列。"""
+    n = (name or "").strip()
+    if not n:
+        return False
+    for anchor in anchors:
+        a = (anchor or "").strip()
+        if not a or n == a:
+            continue
+        if re.search(r"[·．\.]", a):
+            parts = [p for p in re.split(r"[·．\.]", a) if p]
+            if n in parts:
+                return True
+    return False
 
 
 def _fallback_supplementary_name(
@@ -768,7 +874,14 @@ def _fallback_supplementary_name(
 ) -> str:
     """人数仍不足时，优先从剧情/设定叙事中提取尚未入列的真实姓名。"""
     plot_blob = "\n".join(x for x in (seed, narrative) if (x or "").strip())
-    for n in extract_cast_from_narrative(plot_blob, limit=16):
+    ranked = [
+        n
+        for n in extract_cast_from_narrative(plot_blob, limit=16)
+        if _is_narrative_cast_candidate(n, context=plot_blob)
+    ]
+    for _, n in sorted(enumerate(ranked), key=lambda item: (-len(item[1]), item[0])):
+        if _is_subname_of_compound_cast(n, existing):
+            continue
         clean = _scrub_cast_name(n, existing, context=plot_blob)
         if clean:
             return clean

@@ -22,6 +22,7 @@ from narrativeloom.utils.display_utils import (
     scrub_functional_fragment,
     split_concatenated_unified_plans,
     strip_trailing_json_leak,
+    normalize_typified_key_events,
     sanitize_typified_characters,
     typified_characters_meaningful,
     unescape_display_text,
@@ -44,8 +45,9 @@ from narrativeloom.domain.character_names import extract_seed_cast_names, merge_
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-TYPIFIED_KEY_EVENT_CHARS_MIN = 25
-TYPIFIED_KEY_EVENT_CHARS_MAX = 35
+TYPIFIED_KEY_EVENT_CHARS_MIN = 30
+TYPIFIED_KEY_EVENT_CHARS_MAX = 50
+TYPIFIED_KEY_EVENTS_TOTAL_MAX = 300
 PROSE_CHARS_PER_SECTION_MIN = 800
 PROSE_CHARS_PER_SECTION_MAX = 1000
 
@@ -1041,6 +1043,11 @@ def generate_typified_beat(
         )
         if bf:
             data["key_events"] = bf
+    data["key_events"] = normalize_typified_key_events(
+        data.get("key_events", ""),
+        min_lines=ke_min,
+        max_lines=ke_max,
+    )
     if not typified_characters_meaningful(data.get("characters")):
         ch_bf = _backfill_typified_characters(
             cfg,

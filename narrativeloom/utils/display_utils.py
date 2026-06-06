@@ -117,10 +117,81 @@ def typified_characters_meaningful(val: Any) -> bool:
 _PLACEHOLDER_CHARACTER_DESC = (
     "承接前文既定人物",
     "本节须保留",
+    "本节必须存在",
     "关键剧情人物",
+    "动机与性格须在本小节行动中体现",
+    "须在本节行动中有动机",
     "本节出场人物",
     "本节新出场或补充角色",
+    "与本节冲突相关",
 )
+
+
+def _is_placeholder_character_desc(desc: str) -> bool:
+    d = (desc or "").strip()
+    if not d or len(d) < 2:
+        return True
+    return any(p in d for p in _PLACEHOLDER_CHARACTER_DESC)
+
+
+def _plain_setting_hint(setting: str) -> str:
+    parts: List[str] = []
+    for ln in (setting or "").splitlines():
+        t = re.sub(r"^[-*•·]\s*", "", ln.strip())
+        t = re.sub(r"^(地点|时间)[：:]\s*", "", t)
+        if t:
+            parts.append(t.rstrip("，,；; "))
+    if parts:
+        return "，".join(parts)[:36]
+    return (setting or "").strip()[:36]
+
+
+def _resolve_character_description(
+    name: str,
+    desc: str = "",
+    *,
+    seed: str = "",
+    setting: str = "",
+    key_events: str = "",
+    prior_profiles: Optional[Dict[str, str]] = None,
+    raw_map: Optional[Dict[str, str]] = None,
+) -> str:
+    """为人物生成具体设定句，禁止占位/承接类无效描述。"""
+    prior = lookup_character_profile(name, prior_profiles)
+    if prior:
+        return prior
+    d = (desc or "").strip()
+    if d and not _is_placeholder_character_desc(d):
+        return d
+    if raw_map:
+        for k, v in raw_map.items():
+            if k == name or name.startswith(k) or k.startswith(name):
+                if v and not _is_placeholder_character_desc(v):
+                    return v
+    ctx_plot = "\n".join(x for x in (seed, key_events) if x)
+    inferred = _infer_sculptor_trait(name, ctx_plot, setting)
+    trait_desc = inferred.split("：", 1)[-1].strip() if "：" in inferred else inferred.strip()
+    if trait_desc and not _is_placeholder_character_desc(trait_desc):
+        return trait_desc
+    blob = f"{seed}\n{setting}".strip()
+    setting_hint = _plain_setting_hint(setting)
+    if name in blob:
+        for role in ("画师", "画家", "流浪", "工人", "老板", "师傅", "学生", "记者", "管事", "看守"):
+            if role in blob:
+                hint = setting_hint or "本节场景"
+                return f"{role}，与{hint}直接相关"
+        if re.search(r"(作画|壁画|画《|绘画)", blob):
+            hint = setting_hint or "猪圈作画"
+            return f"画师，在{hint}创作"
+        for sent in re.split(r"[。；!\?\n]", seed):
+            if name not in sent:
+                continue
+            tail = sent.split(name, 1)[-1].strip("，,：: 在将向对")
+            if 2 <= len(tail) <= 26 and not _is_placeholder_character_desc(tail):
+                return tail[:26]
+    if setting and len(setting.strip()) >= 6:
+        return f"本节主要人物，身处{_plain_setting_hint(setting) or setting[:22].rstrip('，,；; ')}"
+    return "本节主要人物，行动推动当前情节"
 
 
 def parse_character_profile_map(text: Any) -> Dict[str, str]:
@@ -182,6 +253,50 @@ def extract_sculptor_section_text(text: str) -> str:
     return ""
 
 
+def normalize_typified_key_events(
+    text: Any,
+    *,
+    min_lines: int = 3,
+    max_lines: int = 5,
+) -> str:
+    """规范类型化核心事件：单句 30～50 字/条，小节总和 ≤300 字。"""
+    from narrativeloom.service.llm_client import (
+        TYPIFIED_KEY_EVENT_CHARS_MAX,
+        TYPIFIED_KEY_EVENT_CHARS_MIN,
+        TYPIFIED_KEY_EVENTS_TOTAL_MAX,
+    )
+
+    raw = coerce_display_text(text).strip()
+    if not raw:
+        return raw
+    entries: List[str] = []
+    for entry in _split_event_entries(raw, max_lines):
+        e = re.sub(r"^[-*•·]\s*", "", entry.strip())
+        if not e or not key_events_meaningful(e):
+            continue
+        if len(e) > TYPIFIED_KEY_EVENT_CHARS_MAX:
+            e = e[:TYPIFIED_KEY_EVENT_CHARS_MAX]
+        entries.append(e)
+    out: List[str] = []
+    total = 0
+    for e in entries:
+        if len(out) >= max_lines:
+            break
+        if out and total + len(e) > TYPIFIED_KEY_EVENTS_TOTAL_MAX:
+            break
+        out.append(e)
+        total += len(e)
+    if not out:
+        return raw
+    while len(out) < min_lines and len(entries) > len(out):
+        nxt = entries[len(out)]
+        if total + len(nxt) > TYPIFIED_KEY_EVENTS_TOTAL_MAX:
+            break
+        out.append(nxt)
+        total += len(nxt)
+    return "\n".join(f"- {e}" for e in out)
+
+
 def sanitize_typified_characters(
     text: Any,
     *,
@@ -191,10 +306,14 @@ def sanitize_typified_characters(
     setting: str = "",
     key_events: str = "",
     prior_characters_block: str = "",
+    strict_narrative_allowlist: bool = False,
 ) -> str:
     """过滤类型化 characters 中的非人物条目，补满目标人数。"""
     from narrativeloom.domain.character_names import (
+        _build_sculptor_allowlist,
         _fallback_supplementary_name,
+        _is_subname_of_compound_cast,
+        _resolve_cast_name,
         _scrub_cast_name,
         is_false_person_name,
         merge_unique_names,
@@ -205,31 +324,59 @@ def sanitize_typified_characters(
     locked = merge_unique_names(list(locked_names or []))
     prior_profiles = parse_character_profile_map(prior_characters_block)
     target = max(2, min(int(target), 8))
-    kept: List[tuple[str, str]] = []
-    seen: set[str] = set()
-
-    def _push(name: str, desc: str) -> None:
-        cast_so_far = [n for n, _ in kept]
-        n = _scrub_cast_name(name, cast_so_far, context=f"{desc}\n{context}")
-        d = (desc or "").strip()
-        if not n or n in seen:
-            return
-        if is_false_person_name(n, context=f"{n}\n{d}\n{context}"):
-            return
-        seen.add(n)
-        kept.append((n, d if d else "本节出场人物"))
-
-    for lk in locked:
-        if lk and lk not in seen:
-            prior_desc = lookup_character_profile(lk, prior_profiles)
-            _push(lk, prior_desc or "承接前文既定人物，本节须保留")
+    allow_set: set[str] = set()
+    if strict_narrative_allowlist:
+        allowlist = _build_sculptor_allowlist(
+            seed=seed,
+            locked_names=locked,
+            plot_sources=[key_events],
+            setting_context=setting,
+            body=raw,
+        )
+        allow_set = set(allowlist)
+    raw_map: Dict[str, str] = {}
     for entry in _split_character_entries(raw):
         line = entry.lstrip("-·• ").strip()
-        if not line or "：" not in line and ":" not in line:
+        if not line or ("：" not in line and ":" not in line):
             continue
         line = line.replace(":", "：")
         name, _, desc = line.partition("：")
-        _push(name.strip(), desc.strip())
+        raw_map[name.strip()] = desc.strip()
+    kept: List[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def _push(name: str, desc: str = "") -> None:
+        cast_so_far = [n for n, _ in kept]
+        n = _scrub_cast_name(name, cast_so_far, context=f"{desc}\n{context}")
+        if not n or n in seen:
+            return
+        if _is_subname_of_compound_cast(n, locked + cast_so_far):
+            return
+        if is_false_person_name(n, context=f"{n}\n{desc}\n{context}"):
+            return
+        if strict_narrative_allowlist:
+            resolved_anchor = _resolve_cast_name(n, locked, context=context) or n
+            in_allow = n in allow_set or resolved_anchor in allow_set
+            in_locked = n in locked or resolved_anchor in locked
+            if not in_allow and not in_locked:
+                return
+        seen.add(n)
+        resolved = _resolve_character_description(
+            n,
+            desc,
+            seed=seed,
+            setting=setting,
+            key_events=key_events,
+            prior_profiles=prior_profiles,
+            raw_map=raw_map,
+        )
+        kept.append((n, resolved))
+
+    for lk in locked:
+        if lk and lk not in seen:
+            _push(lk, raw_map.get(lk, ""))
+    for name, desc in raw_map.items():
+        _push(name, desc)
 
     cast_names = [n for n, _ in kept]
     plot_context = f"{seed}\n{setting}\n{key_events}"
@@ -239,7 +386,10 @@ def sanitize_typified_characters(
         )
         if not extra or extra in cast_names:
             break
-        _push(extra, "本节新出场或补充角色")
+        before = len(kept)
+        _push(extra, "")
+        if len(kept) == before:
+            break
         cast_names = [n for n, _ in kept]
 
     lines = [f"- {n}：{d}" for n, d in kept[:target]]
@@ -2221,6 +2371,19 @@ def _brief_sculptor_line(name: str, plot_text: str, setting_text: str = "") -> s
     return _infer_sculptor_trait(name, plot_text, setting_text)
 
 
+def _plot_narrative_for_cast(sources: List[str]) -> str:
+    """职能合并稿中用于识别人物的叙事片段（排除冲突/元叙事块）。"""
+    chunks: List[str] = []
+    for s in sources or []:
+        t = (s or "").strip()
+        if not t:
+            continue
+        if re.search(r"核心矛盾|戏剧冲突|核心冲突|悬念|dramatic conflict|core conflict", t, re.I):
+            continue
+        chunks.append(t)
+    return "\n".join(chunks)
+
+
 def complete_sculptor_body(
     body: str,
     *,
@@ -2231,24 +2394,31 @@ def complete_sculptor_body(
     seed: str = "",
     prior_character_profiles: Optional[Dict[str, str]] = None,
 ) -> str:
-    from narrativeloom.domain.character_names import complete_sculptor_section
-
     plot = list(plot_sources or [])
+    plot_blob = _plot_narrative_for_cast(plot)
     setting_blob = "\n".join(s for s in (setting_sources or []) if (s or "").strip())
-    out = complete_sculptor_section(
+    prior_block = ""
+    if prior_character_profiles:
+        prior_block = "\n".join(
+            f"- {k}：{v}" for k, v in prior_character_profiles.items() if k and v
+        )
+    out = sanitize_typified_characters(
         body,
-        plot_sources=plot,
-        setting_context=setting_blob,
-        locked_names=locked_names,
         target=sculpt_target,
+        locked_names=locked_names,
         seed=seed,
-        prior_character_profiles=prior_character_profiles,
-        functional_mode=True,
+        setting=setting_blob,
+        key_events=plot_blob,
+        prior_characters_block=prior_block,
+        strict_narrative_allowlist=True,
     )
     return scrub_functional_fragment(out)
 
 
 _META_NAME_SUFFIX = re.compile(r"^(张力|高潮|转折|悬念|矛盾|冲突|节奏|戏剧|核心|情节|剧情|伏笔|主题)点$")
+_ABSTRACT_THEME_SUFFIX = re.compile(
+    r"(构图|现实|逻辑|法则|隐喻|象征|主题|命运|救赎|理想|生存|神圣|矛盾|冲突|张力|悬念|伏笔|情节|剧情|车间|时段)$"
+)
 
 
 def _is_meta_character_label(name: str) -> bool:
@@ -2260,6 +2430,10 @@ def _is_meta_character_label(name: str) -> bool:
     if n.endswith("计划") and len(n) <= 5:
         return True
     if _META_NAME_SUFFIX.match(n):
+        return True
+    if _ABSTRACT_THEME_SUFFIX.search(n):
+        return True
+    if re.match(r"^(神圣|生存|理想|现实|构图|逻辑|主题|命运|车间|清理|修理|理车|核心|戏剧|情节|剧情)", n):
         return True
     if re.match(r"^(核心|角色|戏剧|情节|剧情)?(矛盾|冲突|阻碍|张力)$", n):
         return True

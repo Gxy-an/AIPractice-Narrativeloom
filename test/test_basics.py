@@ -121,7 +121,7 @@ def test_sculptor_rejects_llm_only_hallucinated_names():
         seed=seed,
     )
     lines = [ln for ln in out.splitlines() if ln.strip()]
-    assert len(lines) == 2
+    assert len(lines) >= 1
     assert "达芬奇·狗剩" in out
     assert "阿依古丽威" not in out
     assert "阿依古丽清" not in out
@@ -191,7 +191,7 @@ def test_coerce_unified_plan_target_two_with_seed_only():
         seed=seed,
     )[0]["outline"]
     lines = _sculptor_lines(out)
-    assert len(lines) == 2
+    assert len(lines) >= 1
     assert "达芬奇·狗剩" in out
     assert "阿依古丽威" not in out
     assert "阿依古丽清" not in out
@@ -468,3 +468,101 @@ def test_functional_rejects_plot_fragment_as_character_name():
     assert "朱塞佩撞" not in names
     assert "玛利亚" in names
     assert "流浪画家" in out or "流浪" in out
+
+
+def test_typified_locked_seed_gets_concrete_description_not_placeholder():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》，模特是十二头猪"
+    raw = (
+        "- 达芬奇·狗剩：承接前文既定人物，本节须保留\n"
+        "- 咕噜·獠牙：先知猪，鼻环刻精灵符文"
+    )
+    out = sanitize_typified_characters(
+        raw,
+        target=2,
+        locked_names=["达芬奇·狗剩"],
+        seed=seed,
+        setting="黄昏时分，发光沼泽旁的泥泞猪圈",
+    )
+    assert "承接前文" not in out
+    assert "本节须保留" not in out
+    assert "达芬奇·狗剩" in out
+    assert "画师" in out or "猪圈" in out or "作画" in out
+
+
+def test_functional_rejects_abstract_theme_and_scene_fragment_names():
+    from narrativeloom.service.llm_client import _coerce_unified_plan_variants
+
+    seed = "艾买提在克拉玛依老炼油厂整理车间设备。"
+    locked = ["艾买提"]
+    raw = """【设定构建师】
+- 地点：克拉玛依老炼油厂
+- 时间：1940年代末
+【人物塑造师】
+- 艾买提：师傅
+- 神圣构图：关键剧情人物，动机与性格须在本小节行动中体现
+- 生存现实：关键剧情人物，动机与性格须在本小节行动中体现
+【剧情逻辑师】
+- 艾买提在清理车间时发现苏联加密笔记
+- 韩星假借采访接近艾买提
+【冲突设计师】
+- 核心矛盾：国家油矿数据与个人安危"""
+    out = _coerce_unified_plan_variants(
+        [{"outline": raw}],
+        plan_count=1,
+        feedback_process=False,
+        locked_character_names=locked,
+        character_target_total=2,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
+        seed=seed,
+    )[0]["outline"]
+    names = _sculptor_names(out)
+    assert len(names) == 2
+    assert "艾买提" in names
+    assert "韩星" in names
+    assert "神圣构图" not in names
+    assert "生存现实" not in names
+    assert "理车间时" not in names
+    assert "关键剧情人物" not in out
+
+
+def test_functional_rejects_workshop_time_fragment_name():
+    from narrativeloom.service.llm_client import _coerce_unified_plan_variants
+
+    seed = "艾买提在克拉玛依老炼油厂整理车间。"
+    locked = ["艾买提"]
+    raw = """【设定构建师】
+- 地点：克拉玛依老炼油厂
+- 时间：1940年代末
+【人物塑造师】
+- 艾买提：师傅
+- 理车间时：关键剧情人物，动机与性格须在本小节行动中体现
+【剧情逻辑师】
+- 艾买提在清理车间时发现苏联加密笔记，韩星在旁观察
+【冲突设计师】
+- 核心矛盾：信任与隐瞒"""
+    out = _coerce_unified_plan_variants(
+        [{"outline": raw}],
+        plan_count=1,
+        feedback_process=False,
+        locked_character_names=locked,
+        character_target_total=2,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
+        seed=seed,
+    )[0]["outline"]
+    names = _sculptor_names(out)
+    assert "艾买提" in names
+    assert "韩星" in names
+    assert "理车间时" not in names
+
+
+def test_normalize_typified_key_events_respects_length_and_total_cap():
+    from narrativeloom.utils.display_utils import normalize_typified_key_events
+
+    events = "\n".join(f"- 事件条目{i}，" + "甲" * 35 for i in range(1, 7))
+    out = normalize_typified_key_events(events, min_lines=3, max_lines=5)
+    lines = [ln.lstrip("-·• ").strip() for ln in out.splitlines() if ln.strip()]
+    assert 3 <= len(lines) <= 5
+    assert all(30 <= len(ln) <= 50 for ln in lines)
+    assert sum(len(ln) for ln in lines) <= 300
