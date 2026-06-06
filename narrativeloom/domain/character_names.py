@@ -13,9 +13,24 @@ _REJECT_NAME_FRAG = re.compile(
     r"(任务|安全|规则|场景|地点|时间|设备|毡房|勘探|电脑|地质|紧迫|学术|冲突|悬念|矛盾|"
     r"高潮|转折|节奏|情节|剧情|环境|世界|物理|空间|设定|承接|核查|连续|监控|检查|"
     r"氛围|道具|伏笔|因果|逻辑|对话|提醒|拓展|节点|抉择|样本|陈列|诚信|突破|原则|"
-    r"严谨|务实|状态|动机|性格|师$|工程|计划$|程计划|"
-    r"队员$|生命体$|"
-    r"交换|互换|兑换|假装|装没|没见|佯装|相互|不知|该信|相信|矛盾|警$|的警|的告|的话)"
+    r"严谨|务实|状态|动机|性格|工程|计划$|程计划|"
+    r"交换|分享|交易|传递|假装|佯装|装作|"
+    r"(?<![\u4e00-\u9fff])(?:队员|教授|工程师|研究员|研究生|生命体)$)"
+)
+_ACTION_OR_NOUN_NAME = frozenset(
+    {
+        "交换",
+        "分享",
+        "交易",
+        "传递",
+        "消息",
+        "警告",
+        "警觉",
+        "警惕",
+        "假装",
+        "佯装",
+        "装作",
+    }
 )
 
 
@@ -31,6 +46,8 @@ def _is_person(name: str) -> bool:
     n = _canonical(name)
     if not n or _REJECT_NAME_FRAG.search(n):
         return False
+    if re.match(r"^老[\u4e00-\u9fff]{1,2}$", n):
+        return True
     return bool(_is_pure_person_name(n))
 
 
@@ -82,8 +99,7 @@ _DESCRIPTOR_NAME = re.compile(
     r"周[一二三四五六日天][上下]?|"
     r"陶罐|瓷罐|旧罐|空罐|"
     r"他|她|它|我|你|您|们|这|那|其|某|各|每|两|三|四|五|六|七|八|九|十|"
-    r"十二|一头|一头|一头猪|模特是|"
-    r"交换|互换|假装|装没|没见|佯装|相互|不知|相信)"
+    r"十二|一头|一头|一头猪|模特是|交换|分享|交易)"
 )
 
 _TIME_POINT_WORDS = frozenset(
@@ -173,6 +189,16 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
         return False
     if _ABSTRACT_THEME_NAME.match(n):
         return True
+    if "的" in n and not _is_compound_cast_name(n):
+        return True
+    if n in _ACTION_OR_NOUN_NAME:
+        return True
+    if re.search(r"假装|佯装|装作", n):
+        return True
+    if n.endswith("警") and len(n) <= 5:
+        return True
+    if re.search(r"(在一|在旁|在场|在此|在此地|一旁|一边)$", n):
+        return True
     if re.search(r"车间", n) and len(n) <= 6:
         return True
     if re.match(r"^(个人|国家|社会|艺术|生存|理想|神圣|核心).{0,2}(安危|现实|矛盾|冲突|构图|逻辑)$", n):
@@ -194,14 +220,6 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
     if re.search(r"假借", n):
         return True
     if re.match(r"^[假借][采访访]", n) or n in ("间时", "假采访", "假借访"):
-        return True
-    if re.search(r"(假装|装没|没见|佯装|假装没)", n):
-        return True
-    if re.search(r"的(警|告|话|声|言|词|语|影|像|示|诫)", n):
-        return True
-    if n in ("交换", "互换", "兑换", "消息", "情报", "警告", "相互", "矛盾"):
-        return True
-    if n in ("教授", "工程师", "研究员", "研究生", "地质师", "师"):
         return True
     if _DESCRIPTOR_NAME.search(n):
         return True
@@ -468,12 +486,12 @@ def parse_colon_lines(text: str, *, context: str = "") -> Dict[str, str]:
 
 _SEED_COMPOUND_NAME = re.compile(
     r"([\u4e00-\u9fffA-Za-z]{2,10}(?:[·．\.][\u4e00-\u9fffA-Za-z]{1,8})+)"
-    r"(?=[在将向对把被给让与和、，,。；：:\s来去到]|$)"
+    r"(?=[在将向对把被给让与和、，,。；：:\s]|$)"
 )
 _SEED_LEAD_ACTOR = re.compile(
     r"^[\s「『\"'（(]*"
     r"([\u4e00-\u9fffA-Za-z]{2,12}(?:[·．\.][\u4e00-\u9fffA-Za-z]{1,10})+|[\u4e00-\u9fff]{2,5})"
-    r"(?=[在将向对把被给让与和、，,。；来去到]|$)"
+    r"(?=[在将向对把被给让与和、，,。；]|$)"
 )
 
 
@@ -501,21 +519,9 @@ def _is_seed_cast_name(name: str, *, context: str = "") -> bool:
         return False
     if _DESCRIPTOR_NAME.search(n):
         return False
-    if re.match(rf"^{re.escape(n)}(?=[在将向对把被给让与和、，,。；：:\s来去到]|$)", ctx):
+    if re.match(rf"^{re.escape(n)}(?=[在将向对把被给让与和、，,。；：:\s]|$)", ctx):
         return bool(re.fullmatch(r"[\u4e00-\u9fffA-Za-z]{2,12}", n))
     return False
-
-
-def _trim_seed_name_glued_suffix(name: str, *, context: str = "") -> str:
-    """「艾买提常来」误识为「艾买提常」时还原为「艾买提」。"""
-    n = (name or "").strip()
-    blob = context or ""
-    if len(n) >= 3 and n[-1] in "常往往总频频":
-        stem = n[:-1]
-        if blob and re.search(rf"{re.escape(stem)}{re.escape(n[-1])}[来去到在向]", blob):
-            if _is_narrative_cast_candidate(stem, context=blob) or _is_seed_cast_name(stem, context=blob):
-                return stem
-    return n
 
 
 def extract_seed_cast_names(text: str, *, limit: int = 6) -> List[str]:
@@ -527,12 +533,11 @@ def extract_seed_cast_names(text: str, *, limit: int = 6) -> List[str]:
     found: List[str] = []
     for pat in (_SEED_COMPOUND_NAME, _SEED_LEAD_ACTOR):
         for m in pat.finditer(blob):
-            n = _trim_seed_name_glued_suffix(m.group(1).strip(), context=blob)
+            n = m.group(1).strip()
             if _is_seed_cast_name(n, context=blob) and n not in found:
                 found.append(n)
 
     for n in extract_cast_from_narrative(blob, limit=limit):
-        n = _trim_seed_name_glued_suffix(n, context=blob)
         if n not in found:
             found.append(n)
 
@@ -567,6 +572,12 @@ _VERB_AFTER_NAME = (
     "跟踪",
     "砸碎",
     "假装",
+    "佯装",
+    "装作",
+    "撕下",
+    "追问",
+    "看守",
+    "一旁",
 )
 _VERB_AFTER_NAME_RE = "|".join(
     sorted({re.escape(v) for v in _VERB_AFTER_NAME}, key=len, reverse=True)
@@ -585,7 +596,6 @@ _VERB_NAME_TAIL = (
     "观察",
     "发现",
     "清理",
-    "假装",
 )
 
 
@@ -625,14 +635,7 @@ def _extract_verbed_cn_names(text: str, *, limit: int = 8) -> List[str]:
         if len(found) >= limit:
             break
     for m in re.finditer(r"([\u4e00-\u9fff]{2,4})(?=见[\u4e00-\u9fff])", blob):
-        start = m.start()
         name = m.group(1)
-        if start > 0 and re.match(r"[\u4e00-\u9fff]", blob[start - 1]):
-            expanded = blob[start - 1 : start + len(name)]
-            if _is_narrative_cast_candidate(expanded, context=blob):
-                name = expanded
-            else:
-                continue
         if name.endswith(("撞", "听", "看")) and len(name) >= 3:
             name = name[:-1]
         name = _strip_verbed_name_tail(name)
@@ -748,10 +751,31 @@ def _build_sculptor_allowlist(
             allow.append(n)
     for raw in extract_cast_from_narrative(plot_cross, limit=12):
         resolved = _resolve_cast_name(raw, anchors, context=plot_cross) or raw
-        resolved = _trim_seed_name_glued_suffix(resolved, context=plot_cross)
-        clean = _scrub_cast_name(resolved, anchors + allow, context=plot_cross) or resolved
+        clean = _scrub_cast_name(resolved, allow, context=plot_cross) or resolved
         if clean and clean not in allow:
             allow.append(clean)
+    if (body or "").strip():
+        for name, line in parse_colon_lines(body, context=cross).items():
+            desc = line.split("：", 1)[-1] if "：" in line else ""
+            if _is_blocked_sculptor_invention(name, anchors=anchors, cross=plot_cross):
+                continue
+            if not _valid_sculptor_entry(name, desc):
+                continue
+            grounded = (
+                name in plot_cross
+                or any(
+                    p in plot_cross
+                    for p in re.split(r"[·．\.]", name)
+                    if len(p) >= 2
+                )
+                or _is_compound_cast_name(name)
+                or name in anchors
+            )
+            if not grounded:
+                continue
+            clean = _scrub_cast_name(name, allow, context=plot_cross)
+            if clean and clean not in allow:
+                allow.append(clean)
     for a in list(anchors):
         for part in re.split(r"[·．\.]", a):
             if len(part) >= 2 and part in cross and a not in allow:
@@ -766,7 +790,7 @@ def _is_blocked_sculptor_invention(
     anchors: List[str],
     cross: str = "",
 ) -> bool:
-    """拒绝描述词/模板泄漏名；允许剧情或塑造师块中的合法新角色。"""
+    """拒绝描述词/模板泄漏名；cross 须为种子+剧情叙事，不含塑造师正文。"""
     n = (name or "").strip()
     if not n or is_false_person_name(n, context=f"{n}\n{cross}"):
         return True
@@ -829,6 +853,37 @@ def _cast_name_collides(existing: List[str], candidate: str) -> bool:
     return False
 
 
+def _trim_embedded_cast_name(name: str, context: str) -> str:
+    """若姓名前缀粘连（如查周教授→周教授），对齐到上下文中的较短真名。"""
+    n = (name or "").strip()
+    if len(n) <= 3 or not context:
+        return n
+    for title in ("教授", "师傅", "医师", "医生", "同学", "学生", "老板", "僧"):
+        for size in (1, 2):
+            m = re.search(rf"([\u4e00-\u9fff]{{{size}}}{re.escape(title)})$", n)
+            if not m or len(n) <= len(m.group(1)):
+                continue
+            cand = m.group(1)
+            if cand in context or _is_narrative_cast_candidate(cand, context=context):
+                n = cand
+                break
+        else:
+            continue
+        break
+    if len(n) <= 3:
+        return n
+    best = n
+    for m in re.finditer(r"[\u4e00-\u9fff]{2,4}", context):
+        cand = m.group(0)
+        if len(cand) >= len(n) or cand == n or not n.endswith(cand):
+            continue
+        if not _is_narrative_cast_candidate(cand, context=context):
+            continue
+        if len(cand) >= len(best) or best == name:
+            best = cand
+    return best
+
+
 def _scrub_cast_name(name: str, existing: List[str], *, context: str = "") -> str:
     """规整姓名并剔除动词粘连、前缀重复、占位配角名等。"""
     from narrativeloom.utils.display_utils import (
@@ -842,35 +897,29 @@ def _scrub_cast_name(name: str, existing: List[str], *, context: str = "") -> st
         return ""
     if _INVALID_NAME_PREFIX.match(raw):
         return ""
+    if re.search(r"假装|佯装|装作", raw):
+        m = re.search(r"([\u4e00-\u9fff]{2,4})假装", context)
+        if m:
+            raw = m.group(1)
+        else:
+            return ""
     if _is_compound_cast_name(raw) or _is_seed_cast_name(raw, context=context):
         canon = raw
     else:
         canon = _normalize_sculptor_line_name(raw, context=context) or _canonical_person_name(raw)
         if not canon and _is_narrative_cast_candidate(raw, context=context):
             canon = raw
+    if canon and not (_is_compound_cast_name(canon) or _is_seed_cast_name(canon, context=context)):
+        expanded = expand_name_from_context(canon, context)
+        if expanded:
+            canon = expanded
+        canon = _trim_embedded_cast_name(canon, context)
     if not canon or re.fullmatch(r"配角\d+", canon):
         return ""
-    for anchor in existing:
-        if canon.startswith(anchor) and canon != anchor and len(canon) <= len(anchor) + 1:
-            canon = anchor
-            break
     if len(canon) >= 4 and canon.endswith("出面"):
         stem = canon[:-2]
         if stem and _is_narrative_cast_candidate(stem, context=context):
             canon = stem
-    if re.search(r"(假装|装没|没见|佯装|假装没)", canon):
-        if context:
-            m = re.search(rf"([\u4e00-\u9fff]{{1,2}}){re.escape(canon)}", context)
-            if m:
-                expanded = m.group(1) + canon
-                if _is_narrative_cast_candidate(expanded, context=context):
-                    canon = expanded
-                else:
-                    return ""
-            else:
-                return ""
-        else:
-            return ""
     if is_false_person_name(canon, context=f"{canon}\n{context}"):
         return ""
     if _looks_like_scene_fragment(canon):
@@ -915,26 +964,32 @@ def _is_subname_of_compound_cast(name: str, anchors: List[str]) -> bool:
     return False
 
 
-def _fallback_supplementary_name(
+def _fallback_supplementary_names(
     existing: List[str],
     *,
     full: str,
     seed: str,
     narrative: str = "",
-) -> str:
-    """人数仍不足时，优先从剧情/设定叙事中提取尚未入列的真实姓名。"""
-    plot_blob = "\n".join(x for x in (seed, narrative) if (x or "").strip())
+    limit: int = 12,
+) -> List[str]:
+    """从剧情/设定叙事中提取可用于补位的真实姓名（按优先级排序）。"""
+    plot_blob = "\n".join(x for x in (seed, narrative, full) if (x or "").strip())
     ranked = [
         n
         for n in extract_cast_from_narrative(plot_blob, limit=16)
         if _is_narrative_cast_candidate(n, context=plot_blob)
     ]
+    out: List[str] = []
     for _, n in sorted(enumerate(ranked), key=lambda item: (-len(item[1]), item[0])):
-        if _is_subname_of_compound_cast(n, existing):
+        if _is_subname_of_compound_cast(n, existing + out):
             continue
-        clean = _scrub_cast_name(n, existing, context=plot_blob)
-        if clean:
-            return clean
+        clean = _scrub_cast_name(n, existing + out, context=plot_blob)
+        if clean and clean not in existing and clean not in out:
+            out.append(clean)
+        if len(out) >= limit:
+            break
+    if len(out) >= limit:
+        return out
     role_hints = (
         "铁匠",
         "管家",
@@ -952,15 +1007,39 @@ def _fallback_supplementary_name(
         "学生",
         "村民",
         "路人",
+        "僧",
+        "师傅",
     )
     for hint in role_hints:
         if hint not in plot_blob:
             continue
-        for m in re.finditer(rf"({hint}[\u4e00-\u9fff]{{0,2}})", plot_blob):
-            clean = _scrub_cast_name(m.group(1), existing, context=plot_blob)
-            if clean:
-                return clean
-    return ""
+        for m in re.finditer(rf"(?<![\u4e00-\u9fff])([\u4e00-\u9fff]{{1,2}}{re.escape(hint)})", plot_blob):
+            clean = _scrub_cast_name(m.group(1), existing + out, context=plot_blob)
+            if clean and clean not in existing and clean not in out:
+                out.append(clean)
+            if len(out) >= limit:
+                return out
+    for m in re.finditer(r"(老[\u4e00-\u9fff]{1,2})(?![\u4e00-\u9fff])", plot_blob):
+        clean = _scrub_cast_name(m.group(1), existing + out, context=plot_blob)
+        if clean and clean not in existing and clean not in out:
+            out.append(clean)
+        if len(out) >= limit:
+            return out
+    return out
+
+
+def _fallback_supplementary_name(
+    existing: List[str],
+    *,
+    full: str,
+    seed: str,
+    narrative: str = "",
+) -> str:
+    """人数仍不足时，优先从剧情/设定叙事中提取尚未入列的真实姓名。"""
+    names = _fallback_supplementary_names(
+        existing, full=full, seed=seed, narrative=narrative, limit=1
+    )
+    return names[0] if names else ""
 
 
 def _brief_trait(name: str, context: str) -> str:
@@ -1024,105 +1103,26 @@ def complete_sculptor_section(
     prior_character_profiles: Optional[Dict[str, str]] = None,
     functional_mode: bool = False,
 ) -> str:
-    """补全人物塑造师：种子/锁定人物强制保留；补满 target；拒绝描述词与模板泄漏。"""
-    from narrativeloom.utils.display_utils import lookup_character_profile
+    """补全人物塑造师：统一走 sanitize_typified_characters 管线。"""
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
 
-    prior_profiles = prior_character_profiles or {}
+    prior_block = ""
+    if prior_character_profiles:
+        prior_block = "\n".join(
+            f"- {k}：{v}" for k, v in prior_character_profiles.items() if k and v
+        )
     narrative = "\n".join(s for s in (plot_sources or []) if (s or "").strip())
-    extract_blob = f"{body}\n{narrative}".strip()
-    full = f"{seed}\n{extract_blob}\n{setting_context}".strip()
-    target = max(1, min(int(target), 14))
-    cross = "\n".join(x for x in (seed, narrative, setting_context) if (x or "").strip())
-    anchors = _build_sculptor_allowlist(
-        seed=seed,
+    out = sanitize_typified_characters(
+        body,
+        target=target,
         locked_names=locked_names,
-        plot_sources=list(plot_sources or []),
-        setting_context=setting_context,
+        seed=seed,
+        setting=setting_context,
+        key_events=narrative,
+        prior_characters_block=prior_block,
+        strict_narrative_allowlist=True,
     )
-    allowlist = list(anchors)
-    allow_set = set(allowlist)
-    narrative_only = narrative.strip()
-    locked_set = set(locked_names or [])
-    parsed_body = parse_colon_lines(body, context=full)
-    valid_lines: Dict[str, str] = {}
-    for k, v in parsed_body.items():
-        clean = _scrub_cast_name(k, anchors, context=full)
-        if not clean:
-            continue
-        resolved = _resolve_cast_name(clean, anchors, context=cross) or clean
-        if resolved in allow_set or clean in allow_set:
-            valid_lines[resolved if resolved in allow_set else clean] = v
-        elif clean in locked_set or resolved in locked_set:
-            valid_lines[clean] = v
-        elif (
-            functional_mode
-            and _is_compound_cast_name(clean)
-            and clean in (body or "")
-        ):
-            valid_lines[clean] = v
-            if clean not in allowlist:
-                allowlist.append(clean)
-                allow_set.add(clean)
-        elif (
-            not functional_mode
-            and (_is_compound_cast_name(clean) or _is_seed_cast_name(clean, context=seed))
-        ):
-            valid_lines[clean] = v
-        elif narrative_only and clean in narrative_only and not _is_blocked_sculptor_invention(
-            clean, anchors=anchors, cross=narrative_only
-        ):
-            valid_lines[clean] = v
-    for clean in valid_lines:
-        if clean not in allowlist:
-            allowlist.append(clean)
-            allow_set.add(clean)
-    fill_candidates = _sculptor_fill_candidates(
-        valid_lines, anchors=anchors, cross=cross, full=full, allowlist=allowlist
-    )
-
-    cast: List[str] = []
-    for n in anchors:
-        if len(cast) >= target:
-            break
-        resolved = _scrub_cast_name(
-            _resolve_cast_name(n, anchors, context=full) or n, cast, context=full
-        )
-        if resolved and resolved not in cast:
-            cast.append(resolved)
-    for n in fill_candidates:
-        if len(cast) >= target:
-            break
-        resolved = _scrub_cast_name(
-            _resolve_cast_name(n, anchors, context=full) or n, cast, context=full
-        )
-        if resolved and resolved not in cast:
-            cast.append(resolved)
-    while len(cast) < target:
-        extra = _fallback_supplementary_name(
-            cast, full=setting_context, seed=seed, narrative=narrative
-        )
-        if not extra or extra in cast:
-            break
-        cast.append(extra)
-    cast = cast[:target]
-
-    lines: List[str] = []
-    for n in cast:
-        picked = valid_lines.get(n)
-        if not picked:
-            for k, v in valid_lines.items():
-                if n == k or n.startswith(k) or k.startswith(n):
-                    picked = v
-                    break
-        if picked:
-            lines.append(_trim_sculptor_line(picked, context=full))
-        else:
-            prior_desc = lookup_character_profile(n, prior_profiles)
-            if prior_desc:
-                lines.append(f"- {n}：{prior_desc}")
-            else:
-                lines.append(f"- {n}：{_brief_trait(n, full)}")
-    return "\n".join(lines) if lines else "—"
+    return out if (out or "").strip() else "—"
 
 
 def extract_character_names(text: str, *, sculptor_sections_only: bool = False) -> List[str]:

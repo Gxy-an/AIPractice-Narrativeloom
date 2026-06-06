@@ -125,6 +125,7 @@ _PLACEHOLDER_CHARACTER_DESC = (
     "本节新出场或补充角色",
     "与本节冲突相关",
     "本节主要人物",
+    "行动推动当前情节",
 )
 
 
@@ -193,6 +194,20 @@ def _resolve_character_description(
     if setting and len(setting.strip()) >= 6:
         return f"本节主要人物，身处{_plain_setting_hint(setting) or setting[:22].rstrip('，,；; ')}"
     return "本节主要人物，行动推动当前情节"
+
+
+def _name_appears_in_narrative(
+    name: str,
+    *,
+    seed: str = "",
+    key_events: str = "",
+    locked: Optional[List[str]] = None,
+) -> bool:
+    if name in (locked or []):
+        return True
+    blob = f"{seed}\n{key_events}"
+    parts = [name] + [p for p in re.split(r"[·．\.]", name) if len(p) >= 2]
+    return any(p and p in blob for p in parts)
 
 
 def parse_character_profile_map(text: Any) -> Dict[str, str]:
@@ -313,6 +328,8 @@ def sanitize_typified_characters(
     from narrativeloom.domain.character_names import (
         _build_sculptor_allowlist,
         _fallback_supplementary_name,
+        _fallback_supplementary_names,
+        _is_compound_cast_name,
         _is_subname_of_compound_cast,
         _resolve_cast_name,
         _scrub_cast_name,
@@ -325,14 +342,14 @@ def sanitize_typified_characters(
     locked = merge_unique_names(list(locked_names or []))
     prior_profiles = parse_character_profile_map(prior_characters_block)
     target = max(2, min(int(target), 8))
-    allowlist = _build_sculptor_allowlist(
+    plot_allowlist = _build_sculptor_allowlist(
         seed=seed,
         locked_names=locked,
         plot_sources=[key_events],
         setting_context=setting,
         body=raw,
     )
-    allow_set = set(allowlist)
+    allow_set: set[str] = set(plot_allowlist)
     raw_map: Dict[str, str] = {}
     for entry in _split_character_entries(raw):
         line = entry.lstrip("-·• ").strip()
@@ -353,19 +370,22 @@ def sanitize_typified_characters(
             return
         if is_false_person_name(n, context=f"{n}\n{desc}\n{context}"):
             return
+        if _is_meta_character_label(n):
+            return
         if strict_narrative_allowlist:
             resolved_anchor = _resolve_cast_name(n, locked, context=context) or n
             in_allow = n in allow_set or resolved_anchor in allow_set
             in_locked = n in locked or resolved_anchor in locked
             if not in_allow and not in_locked:
                 return
-        elif n not in allow_set and n not in locked:
-            from narrativeloom.domain.character_names import _is_compound_cast_name, _is_seed_cast_name
-
-            is_seed = _is_seed_cast_name(n, context=context) or _is_compound_cast_name(n)
-            if not is_seed:
-                raw_desc = (desc or raw_map.get(n, "")).strip()
-                if not raw_desc or _is_placeholder_character_desc(raw_desc):
+        elif n not in locked and not _is_compound_cast_name(n):
+            if not _name_appears_in_narrative(
+                n, seed=seed, key_events=key_events, locked=locked
+            ):
+                resolved_anchor = _resolve_cast_name(n, locked, context=context) or n
+                if not _name_appears_in_narrative(
+                    resolved_anchor, seed=seed, key_events=key_events, locked=locked
+                ):
                     return
         seen.add(n)
         resolved = _resolve_character_description(
@@ -377,13 +397,7 @@ def sanitize_typified_characters(
             prior_profiles=prior_profiles,
             raw_map=raw_map,
         )
-        kept.append((n, _cap_character_desc(resolved)))
-
-    def _cap_character_desc(desc: str, *, max_len: int = 28) -> str:
-        d = re.sub(r"\s+", " ", (desc or "").strip())
-        if len(d) <= max_len:
-            return d
-        return d[: max_len - 1].rstrip("，,；; ") + "…"
+        kept.append((n, resolved))
 
     for lk in locked:
         if lk and lk not in seen:
@@ -391,34 +405,40 @@ def sanitize_typified_characters(
     for name, desc in raw_map.items():
         _push(name, desc)
 
-    def _fill_from_allowlist() -> List[str]:
-        for n in allowlist:
-            if len(kept) >= target:
-                break
-            if n in seen:
-                continue
-            _push(n, raw_map.get(n, ""))
-        return [n for n, _ in kept]
-
-    cast_names = _fill_from_allowlist()
+    cast_names = [n for n, _ in kept]
     plot_context = f"{seed}\n{setting}\n{key_events}"
-    tried_extras: set[str] = set()
+    fill_sources = list(_fallback_supplementary_names(
+        cast_names, full=context, seed=seed, narrative=plot_context, limit=target * 2
+    ))
+    for n in plot_allowlist:
+        if n not in cast_names and n not in fill_sources:
+            fill_sources.append(n)
+    fill_idx = 0
+    while len(cast_names) < target and fill_idx < len(fill_sources):
+        extra = fill_sources[fill_idx]
+        fill_idx += 1
+        if not extra or extra in cast_names:
+            continue
+        before = len(kept)
+        _push(extra, "")
+        if len(kept) == before:
+            continue
+        cast_names = [n for n, _ in kept]
     while len(cast_names) < target:
         extra = _fallback_supplementary_name(
             cast_names, full=context, seed=seed, narrative=plot_context
         )
-        if not extra or extra in cast_names or extra in tried_extras:
+        if not extra or extra in cast_names:
             break
-        tried_extras.add(extra)
         before = len(kept)
         _push(extra, "")
         if len(kept) == before:
             break
         cast_names = [n for n, _ in kept]
 
-    cast_names = _fill_from_allowlist()
-
     lines = [f"- {n}：{d}" for n, d in kept[:target]]
+    if len(lines) < target and lines:
+        return "\n".join(lines)
     return "\n".join(lines) if lines else raw
 
 
@@ -1305,7 +1325,7 @@ _VERB_NAME_TAIL = re.compile(
 )
 _SINGLE_CHAR_VERB_TAIL = frozenset(
     "无犯却实说问看听走来去等地得了着过等后前中外首因与时第用制抓止住说面向施触试图觉察"
-    "惊认慌怒喜怕抖颤愣呆愣喊叫骂踢砸冲追掏签绑拖挣举撞提"
+    "惊认慌怒喜怕抖颤愣呆愣喊叫骂踢砸冲追掏签绑拖挣举撞"
 )
 _SCULPTOR_GLUED_VERB = frozenset(
     "面向施触试图觉察往到见的地得了着过惊认慌怒喜怕抖颤愣喊叫骂踢砸冲追掏签绑拖挣举撞"
@@ -1318,7 +1338,7 @@ _STANDALONE_ROLE_LABEL = frozenset(
 _CN_SURNAMES = (
     "张李王刘陈林赵周马杨黄吴许苏何顾罗郑谢宋唐韩冯于董袁邓曹曾彭蒋蔡余杜叶程魏吕丁沈任姚卢姜崔谭陆汪范金石廖贾夏韦付方邹熊孟秦白江阎薛尹段雷黎史龙陶贺郝龚邵万钱严武戴莫孔向汤"
 )
-_UYGHUR_NAME_SUFFIX = re.compile(r"(?:买提|古丽|依木|夏木|克力|兰|江|汗|尔|娜|莎|木)$")
+_UYGHUR_NAME_SUFFIX = re.compile(r"(?:买提|古丽|依木|夏木|克力|兰|江|汗|尔|娜|莎|木|提)$")
 _STRICT_PERSON_NAME = re.compile(
     rf"^(?:"
     rf"(?:老)?[{_CN_SURNAMES}](?:[\u4e00-\u9fff]{{1,2}}|[\u4e00-\u9fff](?:导师|老师|教授|师傅|工|姐|哥|叔|姨))|"
@@ -1481,14 +1501,11 @@ def _finalize_sculptor_name(name: str, *, context: str = "") -> str:
         best = n
         for m in re.finditer(r"[\u4e00-\u9fff]{2,5}", ctx):
             cand = m.group(0)
-            if len(cand) <= len(n):
-                continue
-            if not (cand.startswith(n) or (len(n) >= 2 and cand.startswith(n[:2]) and len(cand) == len(n) + 1)):
+            if len(cand) <= len(n) or not cand.startswith(n[: min(2, len(n))]):
                 continue
             cand = _strip_glued_verb_from_name(cand)
             if (
                 cand
-                and len(cand) > len(n)
                 and _is_protected_compound_name(cand)
                 and _STRICT_PERSON_NAME.fullmatch(cand)
                 and _looks_like_person_name(cand)
@@ -1505,10 +1522,6 @@ def _normalize_sculptor_line_name(name: str, *, context: str = "") -> str:
     from narrativeloom.domain.character_names import _is_locked_cast_name, _is_seed_cast_name
 
     if _is_seed_cast_name(raw, context=context):
-        return raw
-    from narrativeloom.domain.character_names import _is_locked_cast_name
-
-    if _is_locked_cast_name(raw, context=context):
         return raw
     fin = _finalize_sculptor_name(raw, context=context)
     if fin:
@@ -2468,6 +2481,12 @@ def _is_meta_character_label(name: str) -> bool:
         return True
     if re.match(r"^(神圣|生存|理想|现实|构图|逻辑|主题|命运|车间|清理|修理|理车|核心|戏剧|情节|剧情)", n):
         return True
+    if "的" in n:
+        return True
+    if n in ("交换", "分享", "交易", "传递", "消息", "警告", "假装", "佯装"):
+        return True
+    if re.search(r"假装|佯装|装作", n):
+        return True
     if re.match(r"^(核心|角色|戏剧|情节|剧情)?(矛盾|冲突|阻碍|张力)$", n):
         return True
     if re.search(r"(与本节|关键人物|出场人物|剧情角色)", n):
@@ -2606,15 +2625,7 @@ def condense_role_body(
         s = ln.strip().lstrip("-·•").strip()
         if not s or s in _KEY_EVENTS_TRIVIAL:
             continue
-        if "：" in s:
-            name, _, desc = s.partition("：")
-            name = name.strip()
-            desc = desc.strip()
-            desc_cap = max(8, max_chars - len(name) - 1)
-            if len(desc) > desc_cap:
-                desc = desc[: desc_cap - 1].rstrip("，,；; ") + "…"
-            s = f"{name}：{desc}"
-        elif truncate and len(s) > max_chars:
+        if truncate and len(s) > max_chars:
             s = s[: max_chars - 1] + "…"
         elif len(s) > max_chars:
             s = s[:max_chars]
