@@ -1155,6 +1155,53 @@ _UNIFIED_FN_BREVITY_ZH = (
 )
 
 
+def _unified_fn_prior_cap(beat_index: int, num_sections: int, feedback_process: bool) -> int:
+    """随小节推进压缩前文注入量，抑制方案越写越长。"""
+    n = max(2, int(num_sections))
+    ratio = beat_index / max(1, n - 1)
+    if ratio < 0.28:
+        return 3000 if feedback_process else 2200
+    if ratio < 0.72:
+        return 2400 if feedback_process else 1700
+    return 2000 if feedback_process else 1400
+
+
+def _unified_fn_length_guidance(beat_index: int, num_sections: int, lang: str) -> str:
+    """按叙事弧动态收紧功能化方案篇幅。"""
+    phase = _story_arc_phase(beat_index, num_sections, "")
+    if lang == "en":
+        if phase == "opening":
+            return (
+                "LENGTH: 2-4 bullets per role block, ≤28 words each; "
+                "character sculptor ≤40 words per line."
+            )
+        if phase == "development":
+            return (
+                "LENGTH: 2-3 bullets per role block, ≤24 words each; "
+                "setting architect ≤3 items (one-line recap for known facts); "
+                "character sculptor ≤32 words per line."
+            )
+        return (
+            "LENGTH: 2-3 bullets per role block, ≤20 words each; "
+            "setting architect ≤2 items; plot logic ≤3 bullets; "
+            "character sculptor ≤28 words per line; no repeating earlier beats."
+        )
+    if phase == "opening":
+        return _UNIFIED_FN_LENGTH_ZH
+    if phase == "development":
+        return (
+            "【篇幅控制·发展段】各职能分块 2～3 条 bullet，每条≤26 字；"
+            "设定构建师最多 3 项（已知地点/时间一句带过）；"
+            "剧情逻辑师≤3 条；冲突设计师≤3 条；"
+            "人物塑造师每人一行≤32 字（只写状态变化，禁止重抄人设）。"
+        )
+    return (
+        "【篇幅控制·高潮段】各职能分块 2～3 条 bullet，每条≤22 字；"
+        "设定构建师最多 2 项；剧情逻辑师≤3 条；冲突设计师≤3 条；"
+        "人物塑造师每人一行≤28 字；禁止复述前文已写情节。"
+    )
+
+
 def _worldview_label(key: str, lang: str) -> str:
     labels = {
         "historical": ("历史架空", "Historical alt-world"),
@@ -1199,7 +1246,8 @@ def generate_unified_functional_plans(
     role_names = [n for n, _ in roles]
     roles_block = "\n".join(f"- {n}：{t}" for n, t in roles)
     headers = "、".join(f"【{n}】" for n in role_names)
-    prior_cap = 3000 if feedback_process else 2200
+    prior_cap = _unified_fn_prior_cap(beat_index, num_sections, feedback_process)
+    length_block = _unified_fn_length_guidance(beat_index, num_sections, lang)
     pf_instr = (
         'Each variant includes non-empty "process_feedback" with creative_goal, design_rationale, narrative_technique.'
         if feedback_process and lang == "en"
@@ -1264,6 +1312,8 @@ def generate_unified_functional_plans(
             "Variants must differ sharply. Do NOT repeat events already in prior beats; only new causal steps. "
             + arc_events_en
             + " "
+            + length_block
+            + " "
             + wv_block
             + pf_instr
         )
@@ -1280,14 +1330,14 @@ def generate_unified_functional_plans(
             f"{setting_fmt}"
             f"{_UNIFIED_FN_TONE_ZH}"
             f"{_UNIFIED_FN_BULLET_FORMAT_ZH}"
-            f"{_UNIFIED_FN_LENGTH_ZH}"
+            f"{length_block}"
             + arc_events_zh
             + (_UNIFIED_FN_BREVITY_ZH if beat_index > 0 else "")
             + "【篇幅】各职能分块精炼可读，禁止用省略号截断；"
             "人物塑造师每行用自然短句写清身份、性格与关系（承接前文），禁止占位句。"
             "【冲突设计师】只写核心矛盾、戏剧冲突、悬念三类 bullet，禁止「阻碍/障碍」栏。"
             "【人物塑造师】禁止使用「动机是」「关系是」「本节状态」等标签；禁止单独写本节状态句；"
-            "每行≤40字；同一姓名不得拆成「阿依古丽」与「古丽」两条。"
+            "同一姓名不得拆成「阿依古丽」与「古丽」两条。"
             "【姓名完整性】须使用设定清单与前文中的完整人名，禁止截断（如「艾买提」不得写成「艾买」，「阿依古丽」不得写成「古丽」）。"
             f"【人物塑造师】分块仅写真实人物姓名，每行「角色名：……」；"
             f"恰好 {sculpt_target} 人（不多不少），缺一人则视为不合格；"
@@ -1352,7 +1402,14 @@ def generate_unified_functional_plans(
             "禁止四版使用相同剧情句模板或相同细节道具组合。\n"
         )
 
-    raw = complete_chat(cfg, system, user, temperature=0.94, max_tokens=3000 if feedback_process else 2600)
+    out_tokens = 2800 if feedback_process else 2400
+    if beat_index > 0:
+        phase = _story_arc_phase(beat_index, num_sections, prior_summary)
+        if phase == "development":
+            out_tokens = min(out_tokens, 2600 if feedback_process else 2200)
+        elif phase == "climax":
+            out_tokens = min(out_tokens, 2400 if feedback_process else 2000)
+    raw = complete_chat(cfg, system, user, temperature=0.94, max_tokens=out_tokens)
     data = _parse_json_content(raw)
     variants = _functional_extract_variants(data, raw) if isinstance(data, dict) else []
     loose_outlines = _extract_fragment_strings_loose(raw)
@@ -1723,6 +1780,7 @@ def generate_antitrope_upgrade_variants(
             "每个 variant.fragment 是「当前节拍拼接槽」的唯一替换全文（不是让各职能重新生成）。"
             "必须保留输入中每一个【职能名】分块标题及顺序，分块内「- 」要点行；"
             "在槽位全文上做反套路创意突变，绝对避免俗套；须与已定前文因果一致。"
+            f"突变处须用 {_MUT_OPEN}…{_MUT_CLOSE} 包裹以便界面高亮；禁止只输出裸 ⟦⟧ 箭头。"
             "三份候选突变角度须明显不同。禁止把 JSON 嵌进 fragment。"
         )
         user = (

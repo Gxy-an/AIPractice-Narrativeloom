@@ -1327,7 +1327,7 @@ def _render_antitrope_workflow(llm_cfg: Dict[str, Any], lg: str, n: int) -> None
     if variants:
         antitrope_labels = [T("plan_a", lg), T("plan_b", lg), T("plan_c", lg)][: len(variants)]
         st.markdown(
-            '<p class="nl-muted-line"><mark class="nl-mut-highlight">高亮</mark> '
+            '<p class="nl-muted-line"><span class="nl-mut-highlight">高亮</span> '
             + "表示反套路突变处（相对已定大纲的新增或改动）。</p>",
             unsafe_allow_html=True,
         )

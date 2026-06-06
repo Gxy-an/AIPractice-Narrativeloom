@@ -400,6 +400,20 @@ def scrub_functional_fragment(fragment: str) -> str:
     return "\n".join(kept).strip()
 
 
+def _normalize_bare_mutation_brackets(raw: str) -> str:
+    """将模型输出的裸 ⟦…⟧（未含 mut 关键字）转为标准突变标记。"""
+    if not raw or "⟦" not in raw:
+        return raw
+
+    def _repl(m: re.Match[str]) -> str:
+        inner = m.group(1)
+        if re.fullmatch(r"\s*/?\s*mut\s*", inner, flags=re.I):
+            return m.group(0)
+        return f"{_MUT_OPEN}{inner}{_MUT_CLOSE}"
+
+    return re.sub(r"⟦([^⟧]+)⟧", _repl, raw)
+
+
 def normalize_mutation_marker_aliases(text: str) -> str:
     """将模型多种突变标记写法统一为 ⟦mut⟧…⟦/mut⟧。"""
     raw = (text or "").replace("\\n", "\n")
@@ -416,7 +430,7 @@ def normalize_mutation_marker_aliases(text: str) -> str:
     raw = raw.replace("【/突变】", _MUT_CLOSE).replace("【突变】", _MUT_OPEN)
     # 清理未成对残留的 <<< >>>
     raw = re.sub(r"<<+(?![<])|>>+(?!>)", "", raw)
-    return raw
+    return _normalize_bare_mutation_brackets(raw)
 
 
 def _normalize_diff_line(ln: str) -> str:
@@ -444,7 +458,8 @@ def inject_diff_mutation_markers(variant: str, baseline: str) -> str:
     """无显式标记时，相对基准大纲为新增/改动行注入突变标记。"""
     if not (variant or "").strip() or not (baseline or "").strip():
         return variant
-    if _MUT_OPEN in variant or "⟦" in variant:
+    variant = normalize_mutation_marker_aliases(variant)
+    if _MUT_OPEN in variant:
         return variant
     base_lines = [ln for ln in baseline.splitlines() if ln.strip()]
     base_norms = {_normalize_diff_line(ln) for ln in base_lines}
@@ -475,7 +490,7 @@ def inject_diff_mutation_markers(variant: str, baseline: str) -> str:
 def prepare_mutation_display_text(text: str, baseline: str = "") -> str:
     """展示用：规范化标记；必要时按基准大纲 diff 补标。"""
     raw = normalize_mutation_marker_aliases(text or "")
-    if _MUT_OPEN not in raw and "⟦" not in raw and (baseline or "").strip():
+    if _MUT_OPEN not in raw and (baseline or "").strip():
         raw = inject_diff_mutation_markers(raw, baseline)
     return raw
 
@@ -2372,7 +2387,7 @@ def _strip_orphan_mutation_marks(text: str) -> str:
 
 def _normalize_mutation_line(ln: str) -> str:
     """补全未闭合的突变标记，便于高亮渲染；先清理误输出的 /mut。"""
-    t = (ln or "").strip()
+    t = normalize_mutation_marker_aliases((ln or "").strip())
     t = re.sub(r"(?<![\u4e00-\u9fffA-Za-z])\\?/?mut\s*$", "", t, flags=re.I).strip()
     if _MUT_OPEN in t and _MUT_CLOSE not in t:
         t = re.sub(r"⟧+\s*$", "", t)
@@ -2381,29 +2396,49 @@ def _normalize_mutation_line(ln: str) -> str:
     return t
 
 
+def _mut_highlight_span(inner: str) -> str:
+    import html as html_mod
+
+    if not inner:
+        return ""
+    return f'<span class="nl-mut-highlight">{html_mod.escape(inner)}</span>'
+
+
 def _html_escape_mutations(text: str) -> str:
     import html as html_mod
 
-    raw = _normalize_mutation_line(text or "")
-    if _MUT_OPEN not in raw:
+    raw = _normalize_mutation_line(normalize_mutation_marker_aliases(text or ""))
+    if _MUT_OPEN not in raw and "⟦" not in raw:
         return html_mod.escape(_strip_orphan_mutation_marks(raw))
     parts: List[str] = []
     i = 0
     while i < len(raw):
         start = raw.find(_MUT_OPEN, i)
-        if start < 0:
+        bare = raw.find("⟦", i) if start < 0 else -1
+        if start < 0 and bare < 0:
             parts.append(html_mod.escape(_strip_orphan_mutation_marks(raw[i:])))
             break
+        if start < 0 or (0 <= bare < start):
+            parts.append(html_mod.escape(_strip_orphan_mutation_marks(raw[i:bare])))
+            end = raw.find("⟧", bare + 1)
+            if end < 0:
+                parts.append(html_mod.escape(raw[bare:]))
+                break
+            inner = _strip_orphan_mutation_marks(raw[bare + 1 : end])
+            if inner and not re.fullmatch(r"\s*/?\s*mut\s*", inner, flags=re.I):
+                parts.append(_mut_highlight_span(inner))
+            i = end + 1
+            continue
         parts.append(html_mod.escape(_strip_orphan_mutation_marks(raw[i:start])))
         end = raw.find(_MUT_CLOSE, start + len(_MUT_OPEN))
         if end < 0:
             inner = _strip_orphan_mutation_marks(raw[start + len(_MUT_OPEN) :])
             if inner:
-                parts.append(f'<mark class="nl-mut-highlight">{html_mod.escape(inner)}</mark>')
+                parts.append(_mut_highlight_span(inner))
             break
         inner = _strip_orphan_mutation_marks(raw[start + len(_MUT_OPEN) : end])
         if inner:
-            parts.append(f'<mark class="nl-mut-highlight">{html_mod.escape(inner)}</mark>')
+            parts.append(_mut_highlight_span(inner))
         i = end + len(_MUT_CLOSE)
     return "".join(parts)
 

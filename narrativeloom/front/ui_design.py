@@ -554,12 +554,19 @@ div.nl-fn-nav-instack-anchor + div[data-testid="stHorizontalBlock"] > div:last-c
 }}
 
 .nl-mut-highlight {{
-    background: linear-gradient(120deg, #FFE0EA 0%, #FFD1E3 45%, #E6E4FF 100%);
-    color: #8B1E3F;
+    background: linear-gradient(120deg, #FFE0EA 0%, #FFD1E3 45%, #E6E4FF 100%) !important;
+    color: #8B1E3F !important;
     padding: 0.12em 0.38em;
     border-radius: 5px;
     font-weight: 600;
     box-shadow: 0 0 0 1px rgba(255, 105, 140, 0.42);
+    display: inline;
+}}
+.nl-fn-module-body span.nl-mut-highlight,
+.nl-fn-module-body mark.nl-mut-highlight,
+.nl-story-seg span.nl-mut-highlight {{
+    background: linear-gradient(120deg, #FFE0EA 0%, #FFD1E3 45%, #E6E4FF 100%) !important;
+    color: #8B1E3F !important;
 }}
 .nl-mut-li {{
     background: linear-gradient(90deg, rgba(255, 224, 234, 0.55) 0%, rgba(255, 255, 255, 0) 100%);

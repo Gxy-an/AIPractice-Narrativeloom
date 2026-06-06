@@ -472,33 +472,68 @@ def fn_variant_sel_key(beat_idx: int, role_name: str) -> str:
     return f"fn_var_sel_{beat_idx}_{fn_role_slug(role_name)}"
 
 
-def _merge_fragment_to_html(fragment: str) -> str:
-    """多职能【分块】拼接稿：保留分块标题 + 分条要点。"""
-    raw = (fragment or "").strip()
-    if not raw:
-        return '<p class="nl-empty-dash">—</p>'
-    if "【" not in raw:
-        return _fragment_to_ul_html(raw)
-    sections = parse_merge_role_sections(raw)
-    if len(sections) <= 1 and sections and sections[0][0] == "【全文】":
-        return _fragment_to_ul_html(sections[0][1])
-    parts: List[str] = []
-    for title, body in sections:
-        parts.append(f'<div class="nl-fn-merge-role">{html.escape(title)}</div>')
-        parts.append(_fragment_to_ul_html(body or "—"))
-    return "".join(parts)
+def _fragment_to_ul_html(
+    fragment: str,
+    *,
+    highlight_mutations: bool = False,
+    mutation_baseline: str = "",
+) -> str:
+    from narrativeloom.utils.display_utils import _outline_line_to_li, prepare_mutation_display_text
 
-
-def _fragment_to_ul_html(fragment: str) -> str:
-    md = fragment_to_markdown_bullets(fragment)
+    raw = fragment or ""
+    if highlight_mutations:
+        raw = prepare_mutation_display_text(raw, mutation_baseline)
+    md = fragment_to_markdown_bullets(raw, preserve_mutations=highlight_mutations)
     if md == "—":
         return '<p class="nl-empty-dash">—</p>'
     items = []
     for ln in md.split("\n"):
         ln = re.sub(r"^-\s*", "", ln.strip())
-        if ln:
+        if not ln:
+            continue
+        if highlight_mutations:
+            li = _outline_line_to_li(ln, highlight_mutations=True)
+            if li:
+                items.append(li)
+        else:
             items.append(f"<li>{html.escape(ln)}</li>")
     return f'<ul class="nl-ul">{"".join(items)}</ul>' if items else '<p class="nl-empty-dash">—</p>'
+
+
+def _merge_fragment_to_html(
+    fragment: str,
+    *,
+    highlight_mutations: bool = False,
+    mutation_baseline: str = "",
+) -> str:
+    """多职能【分块】拼接稿：保留分块标题 + 分条要点。"""
+    raw = (fragment or "").strip()
+    if not raw:
+        return '<p class="nl-empty-dash">—</p>'
+    if "【" not in raw:
+        return _fragment_to_ul_html(
+            raw,
+            highlight_mutations=highlight_mutations,
+            mutation_baseline=mutation_baseline,
+        )
+    sections = parse_merge_role_sections(raw)
+    if len(sections) <= 1 and sections and sections[0][0] == "【全文】":
+        return _fragment_to_ul_html(
+            sections[0][1],
+            highlight_mutations=highlight_mutations,
+            mutation_baseline=mutation_baseline,
+        )
+    parts: List[str] = []
+    for title, body in sections:
+        parts.append(f'<div class="nl-fn-merge-role">{html.escape(title)}</div>')
+        parts.append(
+            _fragment_to_ul_html(
+                body or "—",
+                highlight_mutations=highlight_mutations,
+                mutation_baseline=mutation_baseline,
+            )
+        )
+    return "".join(parts)
 
 
 def _variant_fragment_at(variants: List[Dict[str, Any]], index: int) -> str:
