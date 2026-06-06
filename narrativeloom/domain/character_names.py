@@ -374,11 +374,155 @@ def merge_unique_names(*lists: List[str]) -> List[str]:
     out: List[str] = []
     for lst in lists:
         for raw in lst or []:
-            n = resolve_name(raw)
-            if n and n not in seen:
-                seen.add(n)
-                out.append(n)
+            n = (raw or "").strip()
+            if not n:
+                continue
+            resolved = resolve_name(n) or n
+            if _is_compound_cast_name(resolved) or _is_seed_cast_name(resolved, context=resolved):
+                canon = resolved
+            else:
+                canon = resolved if resolved and _is_person(resolved) else ""
+            if canon and canon not in seen:
+                seen.add(canon)
+                out.append(canon)
     return out
+
+
+def _resolve_cast_name(name: str, anchors: List[str], *, context: str = "") -> str:
+    """将剧情中的简称（如「达芬奇」）对齐到种子全名（「达芬奇·狗剩」）。"""
+    n = (name or "").strip()
+    if not n:
+        return ""
+    for a in anchors:
+        if not a:
+            continue
+        if n == a:
+            return a
+        if a.startswith(n) or n.startswith(a):
+            return a
+        parts = [p for p in re.split(r"[·．\.]", a) if p]
+        if n in parts:
+            return a
+    expanded = expand_name_from_context(n, context)
+    if expanded:
+        for a in anchors:
+            if expanded == a or a.startswith(expanded) or expanded.startswith(a):
+                return a
+        if _is_narrative_cast_candidate(expanded, context=context):
+            return expanded
+    return n if _is_narrative_cast_candidate(n, context=context) else ""
+
+
+def _build_sculptor_allowlist(
+    *,
+    seed: str,
+    locked_names: Optional[List[str]],
+    plot_sources: List[str],
+    setting_context: str = "",
+    body: str = "",
+) -> List[str]:
+    """人物塑造师允许出现的姓名：种子/锁定优先，其余须出现在其它职能叙事中。"""
+    _ = body
+    narrative = "\n".join(s for s in (plot_sources or []) if (s or "").strip())
+    cross = "\n".join(x for x in (seed, narrative, setting_context) if (x or "").strip())
+    anchors = merge_unique_names(list(locked_names or []), extract_seed_cast_names(seed))
+    allow: List[str] = []
+    for n in anchors:
+        if n and n not in allow:
+            allow.append(n)
+    for raw in extract_cast_from_narrative(cross, limit=12):
+        resolved = _resolve_cast_name(raw, anchors, context=cross)
+        if resolved and resolved not in allow:
+            allow.append(resolved)
+    for a in list(anchors):
+        for part in re.split(r"[·．\.]", a):
+            if len(part) >= 2 and part in cross and a not in allow:
+                allow.append(a)
+                break
+    return allow
+
+
+def _is_blocked_sculptor_invention(
+    name: str,
+    *,
+    anchors: List[str],
+    cross: str = "",
+) -> bool:
+    """拒绝描述词/模板泄漏名；允许剧情或塑造师块中的合法新角色。"""
+    n = (name or "").strip()
+    if not n or _DESCRIPTOR_NAME.search(n):
+        return True
+    if _resolve_cast_name(n, anchors, context=cross) in anchors:
+        return False
+    if n in cross or any(p in cross for p in re.split(r"[·．\.]", n) if len(p) >= 2):
+        return False
+    if re.match(r"^阿依古", n) and not re.search(r"阿依古", cross) and not any(
+        "阿依古" in a for a in anchors
+    ):
+        return True
+    return False
+
+
+def _sculptor_fill_candidates(
+    valid_lines: Dict[str, str],
+    *,
+    anchors: List[str],
+    cross: str,
+    full: str,
+) -> List[str]:
+    """塑造师块中可用于补位的合法姓名（不含已锁定/叙事既定者）。"""
+    anchor_set = set(anchors)
+    out: List[str] = []
+    for name, line in valid_lines.items():
+        desc = line.split("：", 1)[-1] if "：" in line else ""
+        if name in anchor_set or name in out:
+            continue
+        if not _valid_sculptor_entry(name, desc):
+            continue
+        if _is_blocked_sculptor_invention(name, anchors=anchors, cross=cross):
+            continue
+        out.append(name)
+    if not out:
+        for name in extract_cast_from_narrative(valid_lines and "\n".join(valid_lines.values()) or "", limit=8):
+            if name in anchor_set or name in out:
+                continue
+            if _is_narrative_cast_candidate(name, context=full) and not _is_blocked_sculptor_invention(
+                name, anchors=anchors, cross=cross
+            ):
+                out.append(name)
+    return out
+
+
+def _fallback_supplementary_name(existing: List[str], *, full: str, seed: str) -> str:
+    """人数仍不足时，从设定/剧情角色词推断一个不与既有重复的中文名。"""
+    blob = f"{seed}\n{full}"
+    role_hints = (
+        "房东",
+        "老板",
+        "管事",
+        "看守",
+        "邻居",
+        "同伴",
+        "助手",
+        "模特",
+        "教授",
+        "学生",
+        "村民",
+        "路人",
+    )
+    for hint in role_hints:
+        if hint not in blob:
+            continue
+        for m in re.finditer(rf"({hint}[\u4e00-\u9fff]{{0,2}})", blob):
+            cand = m.group(1)
+            if len(cand) >= 2 and cand not in existing and _is_narrative_cast_candidate(cand, context=blob):
+                return cand
+    idx = len(existing) + 1
+    generic = f"配角{idx}"
+    while generic in existing:
+        idx += 1
+        generic = f"配角{idx}"
+    return generic
 
 
 def _brief_trait(name: str, context: str) -> str:
@@ -440,42 +584,41 @@ def complete_sculptor_section(
     target: int = 2,
     seed: str = "",
 ) -> str:
-    """补全人物塑造师：优先种子/锁定人物，禁止从叙事误拆形容词当人名。"""
-    from narrativeloom.utils.display_utils import extract_relation_names
-
+    """补全人物塑造师：种子/锁定人物强制保留；补满 target；拒绝描述词与模板泄漏。"""
     narrative = "\n".join(s for s in (plot_sources or []) if (s or "").strip())
     extract_blob = f"{body}\n{narrative}".strip()
     full = f"{seed}\n{extract_blob}\n{setting_context}".strip()
     target = max(1, min(int(target), 14))
-    locked = merge_unique_names(list(locked_names or []), extract_seed_cast_names(seed))
-
+    cross = "\n".join(x for x in (seed, narrative, setting_context) if (x or "").strip())
+    anchors = _build_sculptor_allowlist(
+        seed=seed,
+        locked_names=locked_names,
+        plot_sources=list(plot_sources or []),
+        setting_context=setting_context,
+    )
     valid_lines = parse_colon_lines(body, context=full)
+    fill_candidates = _sculptor_fill_candidates(
+        valid_lines, anchors=anchors, cross=cross, full=full
+    )
 
     cast: List[str] = []
-    for n in locked:
-        if n and n not in cast:
-            cast.append(n)
-    for n in valid_lines.keys():
+    for n in anchors:
         if len(cast) >= target:
             break
-        if n in cast:
-            continue
-        if _is_locked_cast_name(n, locked=locked, context=full) or _valid_sculptor_entry(
-            n, valid_lines[n].split("：", 1)[-1] if "：" in valid_lines[n] else ""
-        ):
-            cast.append(n)
-
-    if len(cast) < target:
-        for n in extract_seed_cast_names(full, limit=target) + extract_cast_from_narrative(
-            extract_blob, limit=target * 2
-        ):
-            if len(cast) >= target:
-                break
-            if n in cast:
-                continue
-            if _is_narrative_cast_candidate(n, context=full):
-                cast.append(n)
-
+        resolved = _resolve_cast_name(n, anchors, context=full) or n
+        if resolved not in cast:
+            cast.append(resolved)
+    for n in fill_candidates:
+        if len(cast) >= target:
+            break
+        resolved = _resolve_cast_name(n, anchors, context=full) or n
+        if resolved and resolved not in cast:
+            cast.append(resolved)
+    while len(cast) < target:
+        extra = _fallback_supplementary_name(cast, full=full, seed=seed)
+        if extra in cast:
+            break
+        cast.append(extra)
     cast = cast[:target]
 
     lines: List[str] = []

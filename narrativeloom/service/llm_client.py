@@ -834,7 +834,10 @@ def generate_typified_beat(
     character_target_total: Optional[int] = None,
 ) -> Dict[str, Any]:
     cfg = _cfg_or_env(llm_cfg)
-    locked = [n.strip() for n in (locked_character_names or []) if (n or "").strip()]
+    locked = merge_unique_names(
+        [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
+        extract_seed_cast_names(seed),
+    )
     locked_txt = "、".join(locked) if locked else ""
     char_target = max(2, int(character_target_total or max(2, len(locked))))
     char_spec_en = f"exactly {char_target} lines"
@@ -1062,7 +1065,10 @@ def _coerce_unified_plan_variants(
     beat_index: int = 0,
     seed: str = "",
 ) -> List[Dict[str, Any]]:
-    locked = [n.strip() for n in (locked_character_names or []) if (n or "").strip()]
+    locked = merge_unique_names(
+        [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
+        extract_seed_cast_names(seed),
+    )
     sculpt_target = character_target_total if character_target_total is not None else max(2, len(locked))
     expanded: List[Dict[str, Any]] = []
     for item in variants:

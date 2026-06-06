@@ -2291,7 +2291,12 @@ def normalize_single_unified_outline(
             sections = [(f"【{rn}】", "") for rn in role_names]
         else:
             return txt
-    locked = [n.strip() for n in (locked_names or []) if (n or "").strip()]
+    from narrativeloom.domain.character_names import extract_seed_cast_names, merge_unique_names
+
+    locked = merge_unique_names(
+        [n.strip() for n in (locked_names or []) if (n or "").strip()],
+        extract_seed_cast_names(seed),
+    )
     sculpt_target = character_target_total if character_target_total is not None else max(2, len(locked))
     setting_cap = 36 if beat_index > 0 else 44
     plot_cap = 48
@@ -2314,6 +2319,14 @@ def normalize_single_unified_outline(
     if not narrative_sources:
         narrative_sources = list(plot_sources)
     all_narrative = list(plot_sources) + list(narrative_sources)
+    sculptor_context_sources = [
+        b
+        for t, b in staged
+        if not _is_sculptor_section_title(t)
+        and "设定构建" not in t
+        and "Setting Architect" not in t
+        and (b or "").strip()
+    ]
     processed: List[Tuple[str, str]] = []
     for title, body in staged:
         if _is_continuity_section_title(title):
@@ -2321,7 +2334,7 @@ def normalize_single_unified_outline(
         if _is_sculptor_section_title(title):
             body = complete_sculptor_body(
                 body,
-                plot_sources=all_narrative if all_narrative else narrative_sources,
+                plot_sources=sculptor_context_sources if sculptor_context_sources else plot_sources,
                 setting_sources=setting_sources,
                 locked_names=locked,
                 sculpt_target=sculpt_target,
@@ -2332,29 +2345,6 @@ def normalize_single_unified_outline(
                     body, title=title, beat_index=beat_index, locked_names=locked
                 )
             body = condense_role_body(body, max_lines=sculpt_target, max_chars=44)
-            lines_out: List[str] = []
-            name_ctx = "\n".join(all_narrative)
-            for ln in body.splitlines():
-                s = ln.strip()
-                if not s:
-                    continue
-                if "：" in s or ":" in s:
-                    probe = s if s.startswith("-") else f"- {s}"
-                    name, _, desc = probe.lstrip("-·• ").partition("：")
-                    if ":" in name and "：" not in name:
-                        name, _, desc = probe.lstrip("-·• ").partition(":")
-                    name = _normalize_sculptor_line_name(name.strip(), context=f"{seed}\n{name_ctx}")
-                    desc = sanitize_sculptor_description(desc)
-                    from narrativeloom.domain.character_names import _is_locked_cast_name
-
-                    if name and desc and (
-                        _is_locked_cast_name(name, locked=locked, context=f"{seed}\n{name_ctx}")
-                        or _is_valid_sculptor_person_line(name, desc)
-                    ):
-                        lines_out.append(f"- {name}：{desc}")
-                else:
-                    lines_out.append(s)
-            body = "\n".join(lines_out) if lines_out else body
         elif "设定构建" in title or "Setting" in title:
             body = format_setting_architect_body(body)
             body = abbreviate_established_sections(

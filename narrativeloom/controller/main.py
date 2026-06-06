@@ -1720,7 +1720,9 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         character_target_total=int(
                             st.session_state.get(f"_fc_char_target_{idx}", char_default)
                         ),
-                        renormalize_on_render=False,
+                        renormalize_on_render=True,
+                        seed=st.session_state.get("seed") or "",
+                        beat_index=idx,
                         cards_per_page=2,
                         plan_labels=plan_labels,
                     )
