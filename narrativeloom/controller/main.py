@@ -396,16 +396,27 @@ def _clear_typified_ui_keys(beat_idx: int) -> None:
 def _prior_characters_block(
     beat_idx: int, labels: List[Tuple[str, str]], lg: str
 ) -> str:
-    """汇总背景与前序小节已定人物，供各题材人格在本节更新（非重置）。"""
+    """汇总背景与前序小节已定人物，供各题材/职能在本节更新（非重置）。"""
+    from narrativeloom.utils.display_utils import extract_sculptor_section_text
+
     parts: List[str] = []
     bg = (st.session_state.get("background_characters") or "").strip()
     if bg:
         parts.append(f"【背景人物档案】\n{bg[:2000]}")
     for i in range(beat_idx):
         b = st.session_state.beats[i]
-        if not isinstance(b, dict) or b.get("mode") != "typified":
+        if not isinstance(b, dict):
             continue
-        ch = (b.get("characters") or "").strip()
+        ch = ""
+        if b.get("mode") == "typified":
+            ch = (b.get("characters") or "").strip()
+        elif b.get("mode") == "functional":
+            outline = (
+                st.session_state.get(f"fn_beat_outline_{i}")
+                or b.get("merged_outline")
+                or ""
+            )
+            ch = extract_sculptor_section_text(str(outline))
         if not ch:
             continue
         ti = labels[i][0] if i < len(labels) else f"Section {i + 1}"
@@ -631,6 +642,7 @@ def _generate_unified_functional(
             prior_outlines.append(str(st.session_state.beats[i].get("merged_outline") or ""))
     homogeneity = build_fn_prior_homogeneity_digest(prior_outlines)
     locked_wv = st.session_state.get("fn_locked_worldview")
+    prior_chars = _prior_characters_block(beat_idx, labels, lang)
     return generate_unified_functional_plans(
         roles=roles,
         seed=st.session_state.seed or "",
@@ -650,6 +662,7 @@ def _generate_unified_functional(
         locked_worldview=locked_wv if beat_idx > 0 else None,
         prior_beat_homogeneity_digest=homogeneity,
         locked_setting_baseline=st.session_state.get("fn_locked_setting") or "",
+        prior_characters_block=prior_chars,
     )
 
 

@@ -1065,6 +1065,7 @@ def generate_typified_beat(
         seed=seed,
         setting=str(data.get("setting", "")),
         key_events=str(data.get("key_events", "")),
+        prior_characters_block=prior_characters_block,
     )
     if not typified_characters_meaningful(data.get("characters")) and (data.get("setting") or "").strip():
         data["characters"] = "- （待补全人物）"
@@ -1098,6 +1099,7 @@ def _coerce_unified_plan_variants(
     role_names: Optional[List[str]] = None,
     beat_index: int = 0,
     seed: str = "",
+    prior_character_profiles: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     locked = merge_unique_names(
         [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
@@ -1119,6 +1121,7 @@ def _coerce_unified_plan_variants(
                 character_target_total=sculpt_target,
                 beat_index=beat_index,
                 seed=seed,
+                prior_character_profiles=prior_character_profiles,
             )
             expanded.append({"outline": normalized, "process_feedback": pf if feedback_process else None})
             if len(expanded) >= plan_count:
@@ -1298,6 +1301,7 @@ def generate_unified_functional_plans(
     prior_beat_homogeneity_digest: str = "",
     locked_setting_baseline: str = "",
     num_sections: int = 6,
+    prior_characters_block: str = "",
 ) -> Dict[str, Any]:
     """一次统筹全部职能，返回 plan_count 个完整小节总体方案（含【职能】分块）。"""
     cfg = _cfg_or_env(llm_cfg)
@@ -1496,6 +1500,9 @@ def generate_unified_functional_plans(
         frag0, _ = _functional_normalize_fragment(raw)
         if frag0.strip():
             variants = [{"outline": frag0}]
+    from narrativeloom.utils.display_utils import parse_character_profile_map
+
+    prior_profiles = parse_character_profile_map(prior_characters_block)
     coerced = _coerce_unified_plan_variants(
         variants,
         plan_count=plan_count,
@@ -1506,6 +1513,7 @@ def generate_unified_functional_plans(
         role_names=role_names,
         beat_index=beat_index,
         seed=seed,
+        prior_character_profiles=prior_profiles,
     )
     return {"_mode": "unified", "variants": coerced}
 

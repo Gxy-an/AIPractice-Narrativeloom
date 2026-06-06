@@ -405,3 +405,66 @@ def test_sanitize_typified_rejects_verb_glued_duplicate():
     assert "马可·猪倌" in names
     assert "马可惊" not in names
     assert not any(n.startswith("配角") for n in names)
+
+
+def test_format_typified_brief_shows_up_to_five_events():
+    from narrativeloom.utils.display_utils import format_typified_brief
+
+    data = {
+        "setting": "1480年佛罗伦萨猪圈",
+        "characters": "- 朱丽叶·猪：流浪女巫",
+        "key_events": "\n".join(f"- 事件{i}" for i in range(1, 6)),
+    }
+    _, _, ev_block = format_typified_brief(data, "zh")
+    assert ev_block.count("·") == 5
+
+
+def test_sanitize_preserves_prior_locked_character_description():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    prior = "- 朱丽叶·猪：披着橄榄枝斗篷的流浪女巫\n- 罗伦佐·屠夫：庄园管事"
+    out = sanitize_typified_characters(
+        "- 埃尔梅琳·烛焰：见证预言",
+        target=2,
+        locked_names=["朱丽叶·猪"],
+        seed="种子",
+        prior_characters_block=prior,
+    )
+    assert "流浪女巫" in out
+    assert "承接前文既定人物" not in out
+
+
+def test_functional_rejects_plot_fragment_as_character_name():
+    from narrativeloom.service.llm_client import _coerce_unified_plan_variants
+
+    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》。"
+    locked = extract_seed_cast_names(seed)
+    raw = """【设定构建师】
+- 地点：文艺复兴意大利猪圈
+- 时间：1502年午后
+【人物塑造师】
+- 达芬奇·狗剩：流浪画家
+- 到朱塞佩：借猪圈，用分三头猪作饵
+- 想借网红：老板
+【剧情逻辑师】
+- 朱塞佩撞见狗剩在猪圈画壁画，玛利亚出面调解
+- 朱塞佩与狗剩争执颜料来源
+【冲突设计师】
+- 核心矛盾：艺术幻想与生存现实"""
+    out = _coerce_unified_plan_variants(
+        [{"outline": raw}],
+        plan_count=1,
+        feedback_process=False,
+        locked_character_names=locked,
+        character_target_total=3,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
+        seed=seed,
+    )[0]["outline"]
+    names = _sculptor_names(out)
+    assert "达芬奇·狗剩" in names
+    assert "朱塞佩" in names
+    assert "到朱塞佩" not in names
+    assert "想借网红" not in names
+    assert "朱塞佩撞" not in names
+    assert "玛利亚" in names
+    assert "流浪画家" in out or "流浪" in out

@@ -208,7 +208,8 @@ _SCENE_FRAGMENT = re.compile(
     r"(猪圈|墙上|壁画|视频|作画|模特|晚餐|颜料|偷|拍|在猪|圈作|圈墙|的达|芬奇|"
     r"乡村|城镇|城市|地区|场景|地点|时间|型号|系列|编号|"
     r"要毁|毁掉|毁颜|颜料|威胁|关键|剧情|本节|出场|行动|动机|"
-    r"铁匠|管事|庄园|契约|墨水|红墨)"
+    r"铁匠|管事|庄园|契约|墨水|红墨|网红|想借|借网|"
+    r"猪|网|红)"
 )
 
 
@@ -504,6 +505,9 @@ _VERB_AFTER_NAME = (
     "遇到",
     "遇见",
     "见到",
+    "出面",
+    "调解",
+    "撞见",
     "拿出",
     "掏出",
 )
@@ -720,10 +724,16 @@ def _cast_name_collides(existing: List[str], candidate: str) -> bool:
 
 def _scrub_cast_name(name: str, existing: List[str], *, context: str = "") -> str:
     """规整姓名并剔除动词粘连、前缀重复、占位配角名等。"""
-    from narrativeloom.utils.display_utils import _canonical_person_name, _normalize_sculptor_line_name
+    from narrativeloom.utils.display_utils import (
+        _INVALID_NAME_PREFIX,
+        _canonical_person_name,
+        _normalize_sculptor_line_name,
+    )
 
     raw = (name or "").strip()
     if not raw or re.fullmatch(r"配角\d+", raw):
+        return ""
+    if _INVALID_NAME_PREFIX.match(raw):
         return ""
     if _is_compound_cast_name(raw) or _is_seed_cast_name(raw, context=context):
         canon = raw
@@ -848,8 +858,13 @@ def complete_sculptor_section(
     locked_names: Optional[List[str]] = None,
     target: int = 2,
     seed: str = "",
+    prior_character_profiles: Optional[Dict[str, str]] = None,
+    functional_mode: bool = False,
 ) -> str:
     """补全人物塑造师：种子/锁定人物强制保留；补满 target；拒绝描述词与模板泄漏。"""
+    from narrativeloom.utils.display_utils import lookup_character_profile
+
+    prior_profiles = prior_character_profiles or {}
     narrative = "\n".join(s for s in (plot_sources or []) if (s or "").strip())
     extract_blob = f"{body}\n{narrative}".strip()
     full = f"{seed}\n{extract_blob}\n{setting_context}".strip()
@@ -864,6 +879,7 @@ def complete_sculptor_section(
     allowlist = list(anchors)
     allow_set = set(allowlist)
     narrative_only = narrative.strip()
+    locked_set = set(locked_names or [])
     parsed_body = parse_colon_lines(body, context=full)
     valid_lines: Dict[str, str] = {}
     for k, v in parsed_body.items():
@@ -873,7 +889,21 @@ def complete_sculptor_section(
         resolved = _resolve_cast_name(clean, anchors, context=cross) or clean
         if resolved in allow_set or clean in allow_set:
             valid_lines[resolved if resolved in allow_set else clean] = v
-        elif _is_compound_cast_name(clean) or _is_seed_cast_name(clean, context=full):
+        elif clean in locked_set or resolved in locked_set:
+            valid_lines[clean] = v
+        elif (
+            functional_mode
+            and _is_compound_cast_name(clean)
+            and clean in (body or "")
+        ):
+            valid_lines[clean] = v
+            if clean not in allowlist:
+                allowlist.append(clean)
+                allow_set.add(clean)
+        elif (
+            not functional_mode
+            and (_is_compound_cast_name(clean) or _is_seed_cast_name(clean, context=seed))
+        ):
             valid_lines[clean] = v
         elif narrative_only and clean in narrative_only and not _is_blocked_sculptor_invention(
             clean, anchors=anchors, cross=narrative_only
@@ -904,14 +934,6 @@ def complete_sculptor_section(
         )
         if resolved and resolved not in cast:
             cast.append(resolved)
-    for n in allowlist:
-        if len(cast) >= target:
-            break
-        resolved = _scrub_cast_name(
-            _resolve_cast_name(n, anchors, context=full) or n, cast, context=full
-        )
-        if resolved and resolved not in cast:
-            cast.append(resolved)
     while len(cast) < target:
         extra = _fallback_supplementary_name(
             cast, full=setting_context, seed=seed, narrative=narrative
@@ -932,7 +954,11 @@ def complete_sculptor_section(
         if picked:
             lines.append(_trim_sculptor_line(picked, context=full))
         else:
-            lines.append(f"- {n}：{_brief_trait(n, full)}")
+            prior_desc = lookup_character_profile(n, prior_profiles)
+            if prior_desc:
+                lines.append(f"- {n}：{prior_desc}")
+            else:
+                lines.append(f"- {n}：{_brief_trait(n, full)}")
     return "\n".join(lines) if lines else "—"
 
 

@@ -114,6 +114,74 @@ def typified_characters_meaningful(val: Any) -> bool:
     return named >= 2
 
 
+_PLACEHOLDER_CHARACTER_DESC = (
+    "承接前文既定人物",
+    "本节须保留",
+    "关键剧情人物",
+    "本节出场人物",
+    "本节新出场或补充角色",
+)
+
+
+def parse_character_profile_map(text: Any) -> Dict[str, str]:
+    """从背景/前序小节人物块提取「姓名→身份描述」映射。"""
+    from narrativeloom.domain.character_names import _is_compound_cast_name
+
+    raw = coerce_display_text(text).strip()
+    if not raw:
+        return {}
+    out: Dict[str, str] = {}
+    for entry in _split_character_entries(raw):
+        line = entry.lstrip("-·• ").strip()
+        if not line or ("：" not in line and ":" not in line):
+            continue
+        line = line.replace(":", "：")
+        name, _, desc = line.partition("：")
+        name = name.strip()
+        desc = re.sub(r"\s+", " ", desc.strip())
+        if not name or len(desc) < 2:
+            continue
+        if any(p in desc for p in _PLACEHOLDER_CHARACTER_DESC):
+            continue
+        out[name] = desc
+    merged = dict(out)
+    for name, desc in out.items():
+        if not _is_compound_cast_name(name):
+            continue
+        root = name.split("·")[0]
+        if root and root not in merged:
+            merged[root] = desc
+    return merged
+
+
+def lookup_character_profile(
+    name: str,
+    profiles: Optional[Dict[str, str]],
+) -> str:
+    """按姓名（含复合名/简称）查找已有介绍。"""
+    n = (name or "").strip()
+    if not n or not profiles:
+        return ""
+    if n in profiles:
+        return profiles[n]
+    for key, desc in profiles.items():
+        if n == key or n.startswith(key) or key.startswith(n):
+            return desc
+        parts = [p for p in re.split(r"[·．\.]", key) if p]
+        if n in parts or any(n.startswith(p) or p.startswith(n) for p in parts if len(p) >= 2):
+            return desc
+    return ""
+
+
+def extract_sculptor_section_text(text: str) -> str:
+    """从职能合并稿中提取【人物塑造师】正文。"""
+    sections = parse_merge_role_sections(text or "")
+    for title, body in sections:
+        if _is_sculptor_section_title(title):
+            return (body or "").strip()
+    return ""
+
+
 def sanitize_typified_characters(
     text: Any,
     *,
@@ -122,6 +190,7 @@ def sanitize_typified_characters(
     seed: str = "",
     setting: str = "",
     key_events: str = "",
+    prior_characters_block: str = "",
 ) -> str:
     """过滤类型化 characters 中的非人物条目，补满目标人数。"""
     from narrativeloom.domain.character_names import (
@@ -134,6 +203,7 @@ def sanitize_typified_characters(
     raw = coerce_display_text(text).strip()
     context = f"{seed}\n{setting}\n{key_events}\n{raw}"
     locked = merge_unique_names(list(locked_names or []))
+    prior_profiles = parse_character_profile_map(prior_characters_block)
     target = max(2, min(int(target), 8))
     kept: List[tuple[str, str]] = []
     seen: set[str] = set()
@@ -151,7 +221,8 @@ def sanitize_typified_characters(
 
     for lk in locked:
         if lk and lk not in seen:
-            _push(lk, "承接前文既定人物，本节须保留")
+            prior_desc = lookup_character_profile(lk, prior_profiles)
+            _push(lk, prior_desc or "承接前文既定人物，本节须保留")
     for entry in _split_character_entries(raw):
         line = entry.lstrip("-·• ").strip()
         if not line or "：" not in line and ":" not in line:
@@ -364,7 +435,7 @@ def format_typified_brief(data: dict, lang: str = "zh") -> Tuple[str, str, str]:
     char_entries = [e for e in char_entries if e and e not in _KEY_EVENTS_TRIVIAL]
     char_block = "\n".join(f"· {e}" for e in char_entries) if char_entries else dash
 
-    ev_entries = _split_event_entries(events, 3)
+    ev_entries = _split_event_entries(events, 5)
     ev_block = "\n".join(f"· {e}" for e in ev_entries) if ev_entries else dash
 
     return place_line, char_block, ev_block
@@ -1050,7 +1121,7 @@ _PLOT_BEAT_NAME_SUFFIX = re.compile(
     r"出现|突然|沉默|首次|犯|却|实|无|用电|回应|坚持|进入|离开|开始|结束)$"
 )
 _INVALID_NAME_PREFIX = re.compile(
-    r"^[但而却且并又也还就才仍若如虽因把被让给从向在以与和对]"
+    r"^[但而却且并又也还就才仍若如虽因把被让给从向在以与和对到想]"
 )
 _VERB_NAME_TAIL = re.compile(
     r"(出现|突然|沉默|首次|犯|却|实|无|用电|回应|坚持|进入|离开|开始|结束|"
@@ -1058,10 +1129,10 @@ _VERB_NAME_TAIL = re.compile(
 )
 _SINGLE_CHAR_VERB_TAIL = frozenset(
     "无犯却实说问看听走来去等地得了着过等后前中外首因与时第用制抓止住说面向施触试图觉察"
-    "惊认慌怒喜怕抖颤愣呆愣喊叫骂踢砸冲追掏签绑拖挣举"
+    "惊认慌怒喜怕抖颤愣呆愣喊叫骂踢砸冲追掏签绑拖挣举撞"
 )
 _SCULPTOR_GLUED_VERB = frozenset(
-    "面向施触试图觉察往到见的地得了着过惊认慌怒喜怕抖颤愣喊叫骂踢砸冲追掏签绑拖挣举"
+    "面向施触试图觉察往到见的地得了着过惊认慌怒喜怕抖颤愣喊叫骂踢砸冲追掏签绑拖挣举撞"
 )
 _SCENE_GLUED_ON_NAME = frozenset("古国城馆厅室皇朝代纪世疆镇村寺塔堡域油魂")
 _BOGUS_NAME_PREFIX = re.compile(r"^(曾是|原来|曾经|如今|以前|当时|当年|其中|作为|一位|一名|一名叫)")
@@ -2158,6 +2229,7 @@ def complete_sculptor_body(
     locked_names: Optional[List[str]] = None,
     sculpt_target: int = 2,
     seed: str = "",
+    prior_character_profiles: Optional[Dict[str, str]] = None,
 ) -> str:
     from narrativeloom.domain.character_names import complete_sculptor_section
 
@@ -2170,6 +2242,8 @@ def complete_sculptor_body(
         locked_names=locked_names,
         target=sculpt_target,
         seed=seed,
+        prior_character_profiles=prior_character_profiles,
+        functional_mode=True,
     )
     return scrub_functional_fragment(out)
 
@@ -2359,6 +2433,7 @@ def normalize_single_unified_outline(
     character_target_total: Optional[int] = None,
     beat_index: int = 0,
     seed: str = "",
+    prior_character_profiles: Optional[Dict[str, str]] = None,
 ) -> str:
     """清洗单份总体方案：截断杂糅、补全人物塑造师、规范分块。"""
     txt = scrub_functional_fragment(strip_trailing_json_leak(unescape_display_text(text)))
@@ -2425,6 +2500,7 @@ def normalize_single_unified_outline(
                 locked_names=locked,
                 sculpt_target=sculpt_target,
                 seed=seed,
+                prior_character_profiles=prior_character_profiles,
             )
             if beat_index > 0:
                 body = abbreviate_established_sections(
