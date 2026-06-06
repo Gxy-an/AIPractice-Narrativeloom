@@ -136,6 +136,23 @@ def _is_placeholder_character_desc(desc: str) -> bool:
     return any(p in d for p in _PLACEHOLDER_CHARACTER_DESC)
 
 
+def _desc_echoes_setting(desc: str, setting: str) -> bool:
+    """人物简介误粘贴设定构建师正文（地点/时间/场景）。"""
+    d = (desc or "").strip()
+    if not d:
+        return False
+    if re.search(r"^本节主要人物[，,]?身处", d):
+        return True
+    if re.match(r"^(地点|时间|场景|规则)[：:]", d):
+        return True
+    for ln in (setting or "").splitlines():
+        t = re.sub(r"^[-*•·]\s*", "", ln.strip())
+        t = re.sub(r"^(地点|时间|场景|规则)[：:]\s*", "", t)
+        if len(t) >= 10 and (t[:18] in d or d[:18] in t):
+            return True
+    return False
+
+
 def _plain_setting_hint(setting: str) -> str:
     parts: List[str] = []
     for ln in (setting or "").splitlines():
@@ -163,7 +180,7 @@ def _resolve_character_description(
     if prior:
         return prior
     d = (desc or "").strip()
-    if d and not _is_placeholder_character_desc(d):
+    if d and not _is_placeholder_character_desc(d) and not _desc_echoes_setting(d, setting):
         return d
     if raw_map:
         for k, v in raw_map.items():
@@ -191,7 +208,9 @@ def _resolve_character_description(
             tail = sent.split(name, 1)[-1].strip("，,：: 在将向对")
             if 2 <= len(tail) <= 26 and not _is_placeholder_character_desc(tail):
                 return tail[:26]
-    if setting and len(setting.strip()) >= 6:
+    if setting and len(setting.strip()) >= 6 and _name_appears_in_narrative(
+        name, seed=seed, key_events=key_events, locked=list((prior_profiles or {}).keys())
+    ):
         return f"本节主要人物，身处{_plain_setting_hint(setting) or setting[:22].rstrip('，,；; ')}"
     return "本节主要人物，行动推动当前情节"
 
@@ -370,10 +389,12 @@ def sanitize_typified_characters(
             return
         if is_false_person_name(n, context=f"{n}\n{desc}\n{context}"):
             return
+        resolved_anchor = _resolve_cast_name(n, locked, context=context) or n
+        if _desc_echoes_setting(desc, setting) and n not in locked and resolved_anchor not in locked:
+            return
         if _is_meta_character_label(n):
             return
         if strict_narrative_allowlist:
-            resolved_anchor = _resolve_cast_name(n, locked, context=context) or n
             in_allow = n in allow_set or resolved_anchor in allow_set
             in_locked = n in locked or resolved_anchor in locked
             if not in_allow and not in_locked:
@@ -382,7 +403,6 @@ def sanitize_typified_characters(
             if not _name_appears_in_narrative(
                 n, seed=seed, key_events=key_events, locked=locked
             ):
-                resolved_anchor = _resolve_cast_name(n, locked, context=context) or n
                 if not _name_appears_in_narrative(
                     resolved_anchor, seed=seed, key_events=key_events, locked=locked
                 ):
@@ -2648,6 +2668,45 @@ def _looks_like_story_outline(text: str) -> bool:
     if role_blocks == 0 and len(t) > 280 and re.search(r"(小节|节拍|Beat\s+\d)", t, re.I):
         return True
     return False
+
+
+def merge_functional_cast_into_outline(
+    cast: str,
+    outline: str,
+    *,
+    role_names: Optional[List[str]] = None,
+    lang: str = "zh",
+) -> str:
+    """功能化「先定 cast、再写故事」：将独立 cast 字段注入为人物塑造师分块。"""
+    from narrativeloom.domain.personas import is_character_sculptor_role
+
+    cast_body = scrub_functional_fragment((cast or "").strip())
+    outline_txt = (outline or "").strip()
+    if not cast_body:
+        return outline_txt
+    sculptor_rn = None
+    for rn in role_names or []:
+        if is_character_sculptor_role(rn, lang):
+            sculptor_rn = rn
+            break
+    if not sculptor_rn:
+        sculptor_rn = "Character Sculptor" if lang == "en" else "人物塑造师"
+    sections = parse_merge_role_sections(outline_txt, role_names=role_names)
+    filtered = [(t, b) for t, b in sections if not _is_sculptor_section_title(t)]
+    order = _known_role_names(role_names)
+    if not order:
+        return f"【{sculptor_rn}】\n{cast_body}\n\n{outline_txt}".strip()
+    out_sections: List[Tuple[str, str]] = []
+    for rn in order:
+        if _is_continuity_section_title(f"【{rn}】"):
+            continue
+        if is_character_sculptor_role(rn, lang):
+            out_sections.append((f"【{rn}】", cast_body))
+        else:
+            body = _find_section_body(filtered, rn)
+            if (body or "").strip():
+                out_sections.append((f"【{rn}】", body))
+    return rebuild_merge_sections(out_sections) if out_sections else outline_txt
 
 
 def normalize_single_unified_outline(

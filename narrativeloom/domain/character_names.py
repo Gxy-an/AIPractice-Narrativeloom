@@ -15,6 +15,7 @@ _REJECT_NAME_FRAG = re.compile(
     r"氛围|道具|伏笔|因果|逻辑|对话|提醒|拓展|节点|抉择|样本|陈列|诚信|突破|原则|"
     r"严谨|务实|状态|动机|性格|工程|计划$|程计划|"
     r"交换|分享|交易|传递|假装|佯装|装作|"
+    r"飘着|散着|弥漫着|悬浮|漂浮|监控|半透明|"
     r"(?<![\u4e00-\u9fff])(?:队员|教授|工程师|研究员|研究生|生命体)$)"
 )
 _ACTION_OR_NOUN_NAME = frozenset(
@@ -94,6 +95,8 @@ _DESCRIPTOR_NAME = re.compile(
     r"双手|一手|一手|背景|前景|画面|构图|颜料|墙壁|墙皮|泥墙|"
     r"严谨|务实|当前|本节|状态|动机|性格|身份|任务|张力|高潮|转折|悬念|"
     r"核心|戏剧|情节|剧情|伏笔|主题|矛盾|冲突|节奏|"
+    r"任何|飘着|散着|弥漫|悬浮|漂浮|麦秸|半透明|"
+    r"时被|当时|当夜|当被|"
     r"黎明|黄昏|清晨|午夜|正午|凌晨|傍晚|拂晓|深夜|白天|夜晚|上午|下午|中午|"
     r"周一|周二|周三|周四|周五|周六|周日|周天|"
     r"周[一二三四五六日天][上下]?|"
@@ -193,6 +196,17 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
         return True
     if n in _ACTION_OR_NOUN_NAME:
         return True
+    if re.match(r"^任何", n):
+        return True
+    if re.match(r"^(?:飘着|散着|弥漫着|悬浮着|漂浮着)", n):
+        return True
+    if re.match(r"^(?:时被|当时|当夜|当被|时[被让叫给])", n):
+        return True
+    if len(n) <= 3 and n.endswith("中") and re.search(r"[监控控检]", n):
+        return True
+    if len(n) <= 3 and n.endswith("中") and re.search(r"监控", context or ""):
+        if n in (context or ""):
+            return True
     if re.search(r"假装|佯装|装作", n):
         return True
     if n.endswith("警") and len(n) <= 5:
@@ -897,6 +911,9 @@ def _scrub_cast_name(name: str, existing: List[str], *, context: str = "") -> st
         return ""
     if _INVALID_NAME_PREFIX.match(raw):
         return ""
+    prefixed = re.match(r"^(?:时[被让叫给]|被|让|叫|给])([\u4e00-\u9fff]{2,4})$", raw)
+    if prefixed:
+        raw = prefixed.group(1)
     if re.search(r"假装|佯装|装作", raw):
         m = re.search(r"([\u4e00-\u9fff]{2,4})假装", context)
         if m:
