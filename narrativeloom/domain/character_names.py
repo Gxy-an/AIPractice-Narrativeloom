@@ -37,9 +37,10 @@ def _valid_sculptor_entry(name: str, desc: str) -> bool:
     from narrativeloom.utils.display_utils import _is_valid_sculptor_person_line
 
     n = _canonical(name)
-    if not n or _REJECT_NAME_FRAG.search(n) or _DESCRIPTOR_NAME.search(n):
+    ctx = f"{n}\n{desc}"
+    if not n or _REJECT_NAME_FRAG.search(n) or is_false_person_name(n, context=ctx):
         return False
-    if _is_seed_cast_name(n, context=f"{n}\n{desc}"):
+    if _is_seed_cast_name(n, context=ctx):
         return bool((desc or "").strip()) and len((desc or "").strip()) >= 2
     return bool(_is_valid_sculptor_person_line(n, desc))
 
@@ -75,9 +76,105 @@ _DESCRIPTOR_NAME = re.compile(
     r"双手|一手|一手|背景|前景|画面|构图|颜料|墙壁|墙皮|泥墙|"
     r"严谨|务实|当前|本节|状态|动机|性格|身份|任务|张力|高潮|转折|悬念|"
     r"核心|戏剧|情节|剧情|伏笔|主题|矛盾|冲突|节奏|"
+    r"黎明|黄昏|清晨|午夜|正午|凌晨|傍晚|拂晓|深夜|白天|夜晚|上午|下午|中午|"
+    r"周一|周二|周三|周四|周五|周六|周日|周天|"
+    r"周[一二三四五六日天][上下]?|"
+    r"陶罐|瓷罐|旧罐|空罐|"
     r"他|她|它|我|你|您|们|这|那|其|某|各|每|两|三|四|五|六|七|八|九|十|"
     r"十二|一头|一头|一头猪|模特是)"
 )
+
+_TIME_POINT_WORDS = frozenset(
+    {
+        "黎明",
+        "黄昏",
+        "清晨",
+        "午夜",
+        "正午",
+        "凌晨",
+        "傍晚",
+        "拂晓",
+        "深夜",
+        "白天",
+        "夜晚",
+        "上午",
+        "下午",
+        "中午",
+        "早间",
+        "晚间",
+        "子时",
+        "丑时",
+        "寅时",
+        "卯时",
+        "辰时",
+        "巳时",
+        "午时",
+        "未时",
+        "申时",
+        "酉时",
+        "戌时",
+        "亥时",
+        "周一",
+        "周二",
+        "周三",
+        "周四",
+        "周五",
+        "周六",
+        "周日",
+        "周天",
+        "星期一",
+        "星期二",
+        "星期三",
+        "星期四",
+        "星期五",
+        "星期六",
+        "星期日",
+        "星期天",
+    }
+)
+
+_WEEKDAY_TIME_FRAGMENT = re.compile(r"^周[一二三四五六日天][上下]?$")
+
+_OBJECT_LIKE_NAME = re.compile(
+    r"^(?:旧|新|小|大|古|破|空|老|红|白|黑|青|黄|灰|铜|铁|木|石|陶|瓷|玻璃|"
+    r"银|金|铜|铁|木|石|竹|布|纸|皮|毛|棉|麻|丝|草|花|叶|枝|根|"
+    r"猪|狗|猫|鸡|鸭|鱼|鸟|马|牛|羊|"
+    r")*(?:"
+    r"罐|瓶|杯|碗|盘|碟|壶|筒|桶|箱|盒|笼|篮|盆|缸|槽|锅|炉|灶|烟囱|"
+    r"桌|椅|凳|床|柜|架|栏|门|窗|墙|砖|瓦|柱|梁|梯|锁|匙|钥|镜|钟|表|"
+    r"伞|扇|绳|线|链|环|针|钉|锤|斧|铲|刀|剪|包|袋|布|毯|席|垫|"
+    r"树|花|草|叶|石|岩|沙|泥|土|水|火|烟|雾|雨|雪|风|云|月|日|星|"
+    r"照|片|书|本|页|纸|笔|墨|画|卷|"
+    r")$"
+)
+
+
+def is_false_person_name(name: str, *, context: str = "") -> bool:
+    """时间点、星期片段、器物/环境词等，不得当作人物姓名。"""
+    n = (name or "").strip()
+    if not n:
+        return True
+    if _is_compound_cast_name(n) or _is_seed_cast_name(n, context=context):
+        return False
+    if n in _TIME_POINT_WORDS or _WEEKDAY_TIME_FRAGMENT.match(n):
+        return True
+    if len(n) == 3 and n[0] == "周" and n[2] in "上下":
+        return True
+    if _OBJECT_LIKE_NAME.match(n):
+        return True
+    if _DESCRIPTOR_NAME.search(n):
+        return True
+    blob = f"{n}\n{context or ''}"
+    if re.search(rf"时间[：:]\s*[^\n]*{re.escape(n)}", blob):
+        return True
+    if re.search(rf"{re.escape(n)}(?:时分|点钟|时光|之后|之前|左右|刚过|将近)", blob):
+        return True
+    if re.search(rf"周[一二三四五六日天][上下]?午", blob) and re.match(r"^周[一二三四五六日天]", n):
+        return True
+    if re.search(r"(?:陶|瓷|铁|木|石|旧|空)(?:罐|瓶|杯|碗)", blob) and n in blob:
+        if len(n) <= 3 and _OBJECT_LIKE_NAME.match(n):
+            return True
+    return False
 
 
 def _is_locked_cast_name(
@@ -99,7 +196,7 @@ def _is_locked_cast_name(
 def _is_narrative_cast_candidate(name: str, *, context: str = "") -> bool:
     """从叙事文本补人时用的较严规则：禁止把形容词/代词片段当人名。"""
     n = (name or "").strip()
-    if not n or _REJECT_NAME_FRAG.search(n) or _DESCRIPTOR_NAME.search(n):
+    if not n or _REJECT_NAME_FRAG.search(n) or is_false_person_name(n, context=context):
         return False
     if _is_compound_cast_name(n):
         return True
@@ -450,7 +547,7 @@ def _is_blocked_sculptor_invention(
 ) -> bool:
     """拒绝描述词/模板泄漏名；允许剧情或塑造师块中的合法新角色。"""
     n = (name or "").strip()
-    if not n or _DESCRIPTOR_NAME.search(n):
+    if not n or is_false_person_name(n, context=f"{n}\n{cross}"):
         return True
     if _resolve_cast_name(n, anchors, context=cross) in anchors:
         return False

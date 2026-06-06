@@ -18,6 +18,17 @@ def _sculptor_lines(text: str) -> list[str]:
     return [ln.strip() for ln in block.splitlines() if ln.strip()]
 
 
+def _sculptor_names(text: str) -> list[str]:
+    names: list[str] = []
+    for ln in _sculptor_lines(text):
+        probe = ln.lstrip("-·• ").strip()
+        if "：" in probe:
+            names.append(probe.split("：", 1)[0].strip())
+        elif ":" in probe:
+            names.append(probe.split(":", 1)[0].strip())
+    return names
+
+
 def test_repair_colon_split_name():
     name, desc = repair_colon_split_name("阿依古", "丽是一名学生", context="阿依古丽")
     assert name == "阿依古丽"
@@ -184,3 +195,88 @@ def test_coerce_unified_plan_target_two_with_seed_only():
     assert "达芬奇·狗剩" in out
     assert "阿依古丽威" not in out
     assert "阿依古丽清" not in out
+
+
+def test_rejects_time_and_object_as_character_names():
+    from narrativeloom.domain.character_names import (
+        complete_sculptor_section,
+        extract_cast_from_narrative,
+        is_false_person_name,
+        parse_colon_lines,
+    )
+    from narrativeloom.utils.display_utils import extract_names_from_narrative, normalize_single_unified_outline
+
+    seed = "李明在黎明整理老宅中的陶罐。"
+    context = "时间：黎明\n地点：老宅\n周六下午，李明在陶罐旁整理旧物"
+    for bad in ("黎明", "周六下", "陶罐", "周六", "下午"):
+        assert is_false_person_name(bad, context=context), bad
+
+    assert extract_names_from_narrative(context) == ["李明"]
+    assert extract_cast_from_narrative(context) == ["李明"]
+    assert parse_colon_lines(
+        "- 黎明：清晨时分\n- 周六下：午后时光\n- 陶罐：角落旧物",
+        context=context,
+    ) == {}
+
+    locked = ["李明"]
+    out = complete_sculptor_section(
+        "- 黎明：清晨\n- 周六下：午后\n- 陶罐：旧物",
+        plot_sources=["- 周六下午李明在陶罐旁整理"],
+        locked_names=locked,
+        target=2,
+        seed=seed,
+    )
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    assert len(lines) == 2
+    assert "李明" in _sculptor_names("【人物塑造师】\n" + out)
+    for bad in ("黎明", "周六下", "陶罐"):
+        assert bad not in _sculptor_names("【人物塑造师】\n" + out)
+
+    raw = (
+        "【设定构建师】\n- 地点：老宅\n- 时间：黎明\n"
+        "【人物塑造师】\n- 黎明：清晨\n- 周六下：午后\n- 陶罐：旧物\n"
+        "【剧情逻辑师】\n- 周六下午李明在陶罐旁整理"
+    )
+    normalized = normalize_single_unified_outline(
+        raw,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师"],
+        locked_names=locked,
+        character_target_total=2,
+        seed=seed,
+    )
+    sculptor = _sculptor_lines(normalized)
+    assert len(sculptor) == 2
+    names = _sculptor_names(normalized)
+    assert "李明" in names
+    for bad in ("黎明", "周六下", "陶罐"):
+        assert bad not in names
+
+
+def test_coerce_rejects_time_object_sculptor_lines():
+    from narrativeloom.service.llm_client import _coerce_unified_plan_variants
+
+    seed = "李明在黎明整理老宅中的陶罐。"
+    raw = """【设定构建师】
+- 地点：老宅
+- 时间：黎明
+【人物塑造师】
+- 黎明：清晨时分
+- 周六下：午后时光
+- 陶罐：角落旧物
+【剧情逻辑师】
+- 周六下午李明在陶罐旁整理"""
+    out = _coerce_unified_plan_variants(
+        [{"outline": raw}],
+        plan_count=1,
+        feedback_process=False,
+        locked_character_names=["李明"],
+        character_target_total=2,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师"],
+        seed=seed,
+    )[0]["outline"]
+    sculptor = _sculptor_lines(out)
+    assert len(sculptor) == 2
+    names = _sculptor_names(out)
+    assert "李明" in names
+    for bad in ("黎明", "周六下", "陶罐"):
+        assert bad not in names

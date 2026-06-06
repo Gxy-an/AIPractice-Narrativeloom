@@ -924,6 +924,10 @@ _NON_PERSON_LABELS = frozenset(
         "古代沙",
         "古代沙之",
         "夜晚",
+        "黎明",
+        "上午",
+        "下午",
+        "中午",
     }
 )
 _GEO_SCENE_FALSE_NAME = re.compile(
@@ -950,6 +954,10 @@ _TIME_SCENE_NON_PERSON = frozenset(
         "冬季",
         "夏季",
         "春季",
+        "黎明",
+        "上午",
+        "下午",
+        "中午",
     }
 )
 _JSON_JUNK_LINE = re.compile(
@@ -1206,6 +1214,10 @@ def _looks_like_person_name(name: str) -> bool:
     n = (name or "").strip()
     if not n or n in _NON_PERSON_LABELS:
         return False
+    from narrativeloom.domain.character_names import is_false_person_name
+
+    if is_false_person_name(n, context=n):
+        return False
     if _GEO_SCENE_FALSE_NAME.search(n):
         return False
     if _is_meta_character_label(n):
@@ -1345,9 +1357,9 @@ def _is_valid_sculptor_person_line(name: str, description: str) -> bool:
     n = _canonical_person_name((name or "").strip())
     if _is_setting_field_label(n) or n.upper() in _EN_NAME_BLOCK:
         return False
-    from narrativeloom.domain.character_names import _DESCRIPTOR_NAME, _is_seed_cast_name
+    from narrativeloom.domain.character_names import _is_seed_cast_name, is_false_person_name
 
-    if _DESCRIPTOR_NAME.search(n):
+    if is_false_person_name(n, context=f"{n}\n{description}"):
         return False
     if _is_seed_cast_name(n, context=f"{n}\n{description}"):
         desc = (description or "").strip()
@@ -1400,6 +1412,10 @@ def _names_from_bullet_lines(text: str) -> List[str]:
         name = m.group(1).strip()
         name = _normalize_sculptor_line_name(name, context=text)
         if _is_setting_field_label(name):
+            continue
+        from narrativeloom.domain.character_names import is_false_person_name
+
+        if is_false_person_name(name, context=text):
             continue
         if not _is_pure_person_name(name) or name in seen:
             continue
@@ -1817,7 +1833,9 @@ def _scan_plot_name_candidates(text: str, *, limit: int = 8) -> List[str]:
     for pat in scan_patterns:
         for m in re.finditer(pat, raw):
             n = _canonical_person_name(m.group(0))
-            if n and _is_pure_person_name(n):
+            from narrativeloom.domain.character_names import is_false_person_name
+
+            if n and _is_pure_person_name(n) and not is_false_person_name(n, context=raw):
                 counts[n] = counts.get(n, 0) + len(re.findall(re.escape(n), raw))
     ranked = sorted(counts.keys(), key=lambda n: (-counts[n], -len(n), n))
     return _coalesce_person_names(ranked)[:limit]
@@ -1854,8 +1872,12 @@ def extract_names_from_narrative(text: str, *, limit: int = 6) -> List[str]:
         return []
 
     def _keep(name: str, found: List[str]) -> None:
+        from narrativeloom.domain.character_names import is_false_person_name
+
         n = _canonical_person_name(name)
         if not n or not _STRICT_PERSON_NAME.fullmatch(n) or not _is_pure_person_name(n):
+            return
+        if is_false_person_name(n, context=raw):
             return
         if n not in found:
             found.append(n)
