@@ -822,5 +822,16 @@ div[data-testid="stVerticalBlock"]:has(.nl-consent-agree) div[data-testid="stChe
     line-height: 1.45 !important;
     color: var(--nl-body) !important;
 }}
+.nl-consent-check-all {{
+    border-top: 1px dashed var(--nl-border);
+    margin-top: 0.35rem;
+    padding-top: 0.55rem;
+    margin-bottom: 0.15rem;
+}}
+div[data-testid="stVerticalBlock"]:has(.nl-consent-check-all) div[data-testid="stCheckbox"] label span {{
+    font-size: 0.88rem !important;
+    font-weight: 600 !important;
+    color: var(--nl-primary) !important;
+}}
 </style>
 """

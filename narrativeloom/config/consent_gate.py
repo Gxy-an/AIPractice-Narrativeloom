@@ -91,6 +91,21 @@ def _render_sections_html(sections: List[Dict[str, Any]]) -> str:
     return f'<div class="nl-consent-scroll">{inner}</div>'
 
 
+def _set_all_consent(checked: bool) -> None:
+    for i in range(len(CONSENT_STATEMENTS)):
+        st.session_state[f"consent_ck_{i}"] = checked
+
+
+def _on_consent_check_all() -> None:
+    _set_all_consent(bool(st.session_state.get("consent_ck_all")))
+
+
+def _on_consent_item_change() -> None:
+    st.session_state["consent_ck_all"] = all(
+        st.session_state.get(f"consent_ck_{i}", False) for i in range(len(CONSENT_STATEMENTS))
+    )
+
+
 def render_consent_gate() -> None:
     """展示知情同意书；全部勾选并确认后放行。"""
     if st.session_state.get("informed_consent_accepted"):
@@ -117,13 +132,28 @@ def render_consent_gate() -> None:
             unsafe_allow_html=True,
         )
 
+        if "consent_ck_all" not in st.session_state:
+            st.session_state.consent_ck_all = False
+
         all_checked = True
         for i, label in enumerate(CONSENT_STATEMENTS):
             key = f"consent_ck_{i}"
             if key not in st.session_state:
                 st.session_state[key] = False
-            if not st.checkbox(label, key=key):
+            if not st.checkbox(label, key=key, on_change=_on_consent_item_change):
                 all_checked = False
+
+        st.markdown('<div class="nl-consent-check-all">', unsafe_allow_html=True)
+        st.checkbox(
+            T("consent_check_all", lg),
+            key="consent_ck_all",
+            on_change=_on_consent_check_all,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        all_checked = all(
+            st.session_state.get(f"consent_ck_{i}", False) for i in range(len(CONSENT_STATEMENTS))
+        )
 
         if st.button(T("consent_submit", lg), type="primary", use_container_width=True, key="consent_submit_btn"):
             if CONSENT_STATEMENTS and all_checked:
