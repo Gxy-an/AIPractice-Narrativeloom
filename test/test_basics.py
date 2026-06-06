@@ -153,7 +153,7 @@ def test_sculptor_accepts_valid_llm_second_character():
     seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》，模特是十二头猪。"
     locked = extract_seed_cast_names(seed)
     body = "- 老周：猪圈看守，常来赶人"
-    plot = "- 达芬奇被酒馆赶出后闯入猪圈"
+    plot = "- 老周赶走醉酒的达芬奇，仍允许他在猪圈作画"
     out = complete_sculptor_section(
         body,
         plot_sources=[plot],
@@ -280,3 +280,64 @@ def test_coerce_rejects_time_object_sculptor_lines():
     assert "李明" in names
     for bad in ("黎明", "周六下", "陶罐"):
         assert bad not in names
+
+
+def test_functional_plot_name_replaces_sculptor_only_hallucination():
+    from narrativeloom.service.llm_client import _coerce_unified_plan_variants
+
+    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》。"
+    locked = extract_seed_cast_names(seed)
+    raw = """【设定构建师】
+- 地点：托斯卡乡村猪圈
+- 时间：1502年午后
+【人物塑造师】
+- 达芬奇·狗剩：流浪画家
+- 托斯卡：来访学者
+【剧情逻辑师】
+- 朱塞佩看见狗剩在猪圈画壁画，威胁要毁掉颜料
+- 朱塞佩与狗剩争执颜料来源
+【冲突设计师】
+- 核心矛盾：艺术幻想与生存现实"""
+    out = _coerce_unified_plan_variants(
+        [{"outline": raw}],
+        plan_count=1,
+        feedback_process=False,
+        locked_character_names=locked,
+        character_target_total=2,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
+        seed=seed,
+    )[0]["outline"]
+    names = _sculptor_names(out)
+    assert len(names) == 2
+    assert "达芬奇·狗剩" in names
+    assert "朱塞佩" in names
+    assert "托斯卡" not in names
+
+
+def test_sanitize_typified_characters_filters_device():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    raw = (
+        "- 达芬奇·狗剩：牧群编号D-07\n"
+        "- 十二头猪：实验体M系列\n"
+        "- 巡逻嗅探器：型号S-17B\n"
+        "- 黑袍陌生人：通风管中的神秘面孔"
+    )
+    out = sanitize_typified_characters(
+        raw,
+        target=4,
+        locked_names=["达芬奇·狗剩"],
+        seed="达芬奇·狗剩在猪圈作画",
+    )
+    names = _sculptor_names("【人物塑造师】\n" + out)
+    assert "达芬奇·狗剩" in names
+    assert "巡逻嗅探器" not in names
+    assert len(names) == 4
+
+
+def test_extract_verbed_cn_name_giuseppe():
+    from narrativeloom.domain.character_names import extract_cast_from_narrative
+
+    plot = "朱塞佩看见狗剩在猪圈画壁画，威胁要毁掉颜料"
+    names = extract_cast_from_narrative(plot)
+    assert "朱塞佩" in names

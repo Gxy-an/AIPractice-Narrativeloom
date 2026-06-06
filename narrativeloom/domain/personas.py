@@ -123,6 +123,38 @@ TYPIFIED_PERSONAS_EN: List[Tuple[str, str]] = [
     ),
 ]
 
+TYPIFIED_CAST_FOCUS_ZH: Dict[str, str] = {
+    "奇幻世界构建者": "配角须为魔法/异族/秘境相关身份，姓名与职业体现奇幻母题；禁止写成监控设备、巡逻机器等非人物。",
+    "科幻未来学家": "配角须为科研、工程、企业、赛博公民等科幻身份；与悬疑/浪漫/历史题材的配角模板须显著不同。",
+    "谜题解决者": "配角宜为线索人、误导者、调查者、知情者；突出推理链条，勿与其它题材共用同一套配角姓名。",
+    "浪漫牵线人": "配角宜为情感关系中的第三者、亲友、竞争者或见证者；突出关系张力，勿写成安防/设备角色。",
+    "历史研究员": "配角须符合时代身份（匠人、商贾、官吏、僧侣等）；勿出现现代监控/科幻设备型角色。",
+    "恐怖氛围创造者": "配角宜为目击者、幸存者、可疑者、旧识；强调不安与秘密，勿写成仪器或机器。",
+    "冒险向导": "配角宜为向导、对手、雇主、同伴；突出行动与风险，与其它题材配角职业不可雷同。",
+    "喜剧幽默家": "配角宜为闹剧的触发者、吐槽者、误会制造者；身份与命名须带喜剧色彩。",
+    "反乌托邦幻想家": "配角宜为体制执行者、反抗者、底层民众；体现压迫结构，勿写成嗅探器/巡逻机器。",
+    "魔幻现实主义爱好者": "配角宜为邻里、匠人、家族长辈等日常身份；魔幻只在一两处点睛，勿写成科幻设备。",
+}
+
+TYPIFIED_CAST_FOCUS_EN: Dict[str, str] = {
+    "Fantasy World Builder": "Supporting cast must fit fantasy roles (mages, guardians, non-human peoples); never devices or patrol machines.",
+    "Sci-Fi Futurist": "Cast must fit sci-fi roles (engineers, corps, colonists); must differ from mystery/romance/history templates.",
+    "Puzzle Solver": "Cast as clue-givers, red-herring figures, investigators; unique names per genre persona.",
+    "Romance Matchmaker": "Cast as relationship catalysts, rivals, confidants; emphasize chemistry, not machines.",
+    "Historical Researcher": "Period-appropriate roles only; no modern surveillance devices as characters.",
+    "Horror Atmosphere Creator": "Witnesses, suspects, survivors; dread-focused, not instruments.",
+    "Adventure Guide": "Guides, rivals, employers, companions; action-oriented distinct roster.",
+    "Comedy Humorist": "Comic foils and misunderstanding triggers; humor-specific naming.",
+    "Dystopian Visionary": "System agents, rebels, ordinary citizens; no patrol sniffers as people.",
+    "Magical Realism Enthusiast": "Everyday neighbors and artisans; subtle magic, not sci-fi gear.",
+}
+
+
+def typified_cast_focus(genre_name: str, lang: str = "zh") -> str:
+    table = TYPIFIED_CAST_FOCUS_ZH if (lang or "zh") != "en" else TYPIFIED_CAST_FOCUS_EN
+    return table.get(genre_name, "")
+
+
 # 反套路创意师：仅用于拼合后的「一键升级」，不参与并行片段生成
 ANTI_CLICHE_ROLE_ZH = "反套路创意师"
 ANTI_CLICHE_ROLE_EN = "Anti-Cliché Innovator"

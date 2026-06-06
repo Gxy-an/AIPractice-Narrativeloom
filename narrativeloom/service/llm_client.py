@@ -22,6 +22,7 @@ from narrativeloom.utils.display_utils import (
     scrub_functional_fragment,
     split_concatenated_unified_plans,
     strip_trailing_json_leak,
+    sanitize_typified_characters,
     typified_characters_meaningful,
     unescape_display_text,
 )
@@ -36,6 +37,7 @@ from narrativeloom.domain.personas import (
     is_character_sculptor_role,
     is_continuity_checker_role,
     is_unified_plan_excluded_role,
+    typified_cast_focus,
 )
 from narrativeloom.domain.character_names import extract_seed_cast_names, merge_unique_names
 
@@ -242,14 +244,17 @@ def _backfill_typified_characters(
     prior_summary: str,
     locked_names: Optional[List[str]] = None,
     lang: str,
+    character_target_total: Optional[int] = None,
 ) -> str:
     """主生成 JSON 漏字段时，单独补全 characters。"""
     locked_txt = "、".join(locked_names or []) if locked_names else ""
+    char_target = max(2, int(character_target_total or max(2, len(locked_names or []))))
     if lang == "en":
         system = (
             "You write ONLY the characters string for one story section. Output JSON only: "
-            '{"characters":"..."} . The value is ONE string with 2–4 lines separated by \\n; '
-            "each line starts with '- Name: role/relationship/in-scene action (8–18 words, concise; no long biography)'."
+            f'{{"characters":"..."}} . The value is ONE string with exactly {char_target} lines separated by \\n; '
+            "each line starts with '- Name: role/relationship/in-scene action (8–18 words, concise; no long biography)'. "
+            "Only real people—never machines, patrol devices, or AI systems as characters."
         )
         user = (
             f"Sparkles: {seed}\nSection: {beat_title} — {beat_hint}\nGenre persona: {genre_name} ({genre_hint})\n"
@@ -261,8 +266,9 @@ def _backfill_typified_characters(
     else:
         system = (
             "你只负责补全一个小节的「人物」字段。只输出 JSON："
-            '{"characters":"……"} 。characters 为单个字符串，内含 2～4 行，用 \\n 换行；'
+            f'{{"characters":"……"}} 。characters 为单个字符串，内含恰好 {char_target} 行，用 \\n 换行；'
             "每行以「- 」开头，格式「姓名：身份/关系/本节行动」（每行 12～28 字，精炼短句，禁止年龄履历式长传记）；"
+            "仅写真实人物，禁止把机器、设备、嗅探器、巡逻装置、AI 系统当作人物。"
             "须与设定、核心事件一致，并体现题材人格「"
             + genre_name
             + "」的典型人物配置。"
@@ -840,6 +846,8 @@ def generate_typified_beat(
     )
     locked_txt = "、".join(locked) if locked else ""
     char_target = max(2, int(character_target_total or max(2, len(locked))))
+    cast_focus = typified_cast_focus(genre_name, lang)
+    extra_slots = max(0, char_target - len(locked))
     char_spec_en = f"exactly {char_target} lines"
     char_spec_zh = f"恰好 {char_target} 行"
     ke_min, ke_max = _arc_key_events_range(beat_index, num_sections)
@@ -918,6 +926,13 @@ def generate_typified_beat(
             "Write one strong candidate section outline that could stand beside other genre personas. "
             "Avoid clichés and generic placeholders. Emphasize genre-specific differentiation in setting and cast."
         )
+        if cast_focus:
+            user += f"\n[{genre_name} cast focus] {cast_focus}"
+        if extra_slots > 0 and locked:
+            user += (
+                f"\nBesides locked names, add {extra_slots} supporting characters unique to [{genre_name}]; "
+                "names and roles must differ sharply from parallel genre personas—no shared template cast."
+            )
     else:
         system = (
             "你是文学向叙事策划助手。只输出 JSON，不要 Markdown 围栏。语言：中文。"
@@ -945,6 +960,7 @@ def generate_typified_beat(
             "【连续性】若下方提供「已定前文」，本节必须在其人物状态、时间线与因果链上自然递进，禁止无视前文后果或擅自重置故事。"
             "【人物承接】若提供「已定人物档案」，characters 须在其基础上更新：所有已锁定姓名必须保留且不得改名；"
             "为每位已登场人物补充或调整本节的状态、动机与关系；可按当前题材人格新增至多一名新角色。"
+            "【人物硬性要求】仅列真实人物（人类或具名角色），禁止把机器、设备、嗅探器、巡逻装置、AI 系统写成人物。"
             + proc
         )
         user = (
@@ -983,6 +999,13 @@ def generate_typified_beat(
         user += (
             "请生成高完成度小节纲要，并确保与同批其它题材人格候选在设定与人物上明显可区分。"
         )
+        if cast_focus:
+            user += f"\n【{genre_name}人物配置】{cast_focus}"
+        if extra_slots > 0 and locked:
+            user += (
+                f"\n除锁定人物外，须再写 {extra_slots} 名体现「{genre_name}」题材特色的配角；"
+                "其姓名、职业、关系须与其它题材人格并行候选显著不同，禁止共用同一套配角模板。"
+            )
     raw = complete_chat(cfg, system, user, temperature=0.84, max_tokens=1500 if not feedback_process else 1900)
     data = _parse_json_content(raw)
     if not data:
@@ -1029,9 +1052,18 @@ def generate_typified_beat(
             prior_summary=prior_summary or "",
             locked_names=locked,
             lang=lang,
+            character_target_total=char_target,
         )
         if ch_bf:
             data["characters"] = ch_bf
+    data["characters"] = sanitize_typified_characters(
+        data.get("characters", ""),
+        target=char_target,
+        locked_names=locked,
+        seed=seed,
+        setting=str(data.get("setting", "")),
+        key_events=str(data.get("key_events", "")),
+    )
     if not typified_characters_meaningful(data.get("characters")) and (data.get("setting") or "").strip():
         data["characters"] = "- （待补全人物）"
     return data

@@ -1277,6 +1277,9 @@ def _story_editor(llm_cfg: Dict[str, Any]) -> None:
                 if out:
                     st.session_state.expanded_prose = out
                     st.success(T("editor_updated", lg))
+                    st.rerun()
+                else:
+                    st.error(T("merge_empty_err", lg))
         with right:
             st.radio(
                 T("mode", lg),

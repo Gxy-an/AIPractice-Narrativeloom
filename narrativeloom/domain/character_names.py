@@ -149,10 +149,19 @@ _OBJECT_LIKE_NAME = re.compile(
 )
 
 
+_DEVICE_OR_MACHINE = re.compile(
+    r"(?:嗅探器|探测器|扫描仪|监控器|监视器|警报器|报警器|无人机|机器人|"
+    r"终端机|处理器|计算机|服务器|执法器|巡逻机|机械|机甲|"
+    r"装置|设备|仪器|器械|程序|系统|算法|型号|S-\d|Model)"
+)
+
+
 def is_false_person_name(name: str, *, context: str = "") -> bool:
-    """时间点、星期片段、器物/环境词等，不得当作人物姓名。"""
+    """时间点、星期片段、器物/环境词、设备名等，不得当作人物姓名。"""
     n = (name or "").strip()
     if not n:
+        return True
+    if _DEVICE_OR_MACHINE.search(n):
         return True
     if _is_compound_cast_name(n) or _is_seed_cast_name(n, context=context):
         return False
@@ -193,10 +202,43 @@ def _is_locked_cast_name(
     return _is_seed_cast_name(n, context=context)
 
 
+_SCENE_FRAGMENT = re.compile(
+    r"(猪圈|墙上|壁画|视频|作画|模特|晚餐|颜料|偷|拍|在猪|圈作|圈墙|的达|芬奇|"
+    r"乡村|城镇|城市|地区|场景|地点|时间|型号|系列|编号)"
+)
+
+
+def _looks_like_scene_fragment(name: str) -> bool:
+    n = (name or "").strip()
+    if not n or _is_compound_cast_name(n):
+        return False
+    return bool(_SCENE_FRAGMENT.search(n))
+
+
+def _looks_like_place_name_token(name: str, *, context: str = "") -> bool:
+    """「托斯卡乡村」等地名片段，不得当作人物。"""
+    n = (name or "").strip()
+    blob = context or ""
+    if not n or not blob:
+        return False
+    if re.search(
+        rf"{re.escape(n)}(?:乡村|古镇|古城|城市|小镇|地区|区域|国家|省份|省|州|岛|半岛|平原|流域|山区|草原|沙漠|港口|码头)",
+        blob,
+    ):
+        return True
+    if re.search(rf"(?:地点|位于|地处)[：:\s][^\n]*{re.escape(n)}", blob):
+        return True
+    return False
+
+
 def _is_narrative_cast_candidate(name: str, *, context: str = "") -> bool:
     """从叙事文本补人时用的较严规则：禁止把形容词/代词片段当人名。"""
     n = (name or "").strip()
     if not n or _REJECT_NAME_FRAG.search(n) or is_false_person_name(n, context=context):
+        return False
+    if _looks_like_place_name_token(n, context=context):
+        return False
+    if _looks_like_scene_fragment(n):
         return False
     if _is_compound_cast_name(n):
         return True
@@ -379,7 +421,7 @@ def parse_colon_lines(text: str, *, context: str = "") -> Dict[str, str]:
 
 
 _SEED_COMPOUND_NAME = re.compile(
-    r"([\u4e00-\u9fffA-Za-z]{2,12}(?:[·．\.][\u4e00-\u9fffA-Za-z]{1,10})+)"
+    r"([\u4e00-\u9fffA-Za-z]{2,10}(?:[·．\.][\u4e00-\u9fffA-Za-z]{1,8})+)"
     r"(?=[在将向对把被给让与和、，,。；：:\s]|$)"
 )
 _SEED_LEAD_ACTOR = re.compile(
@@ -437,6 +479,73 @@ def extract_seed_cast_names(text: str, *, limit: int = 6) -> List[str]:
     return ranked[:limit]
 
 
+_VERB_AFTER_NAME = (
+    "看见",
+    "看到",
+    "说道",
+    "威胁",
+    "发现",
+    "赶走",
+    "偷拍",
+    "遇到",
+    "遇见",
+    "说",
+    "道",
+    "问",
+    "答",
+    "被",
+    "把",
+    "向",
+    "对",
+    "遇",
+    "赶",
+    "踢",
+    "骂",
+    "打",
+    "拦",
+    "挡",
+    "画",
+    "写",
+    "读",
+    "听",
+    "拿",
+    "举",
+    "站",
+    "走",
+    "跑",
+    "来",
+    "去",
+    "坐",
+    "哭",
+    "笑",
+)
+_VERB_AFTER_NAME_RE = "|".join(
+    sorted({re.escape(v) for v in _VERB_AFTER_NAME}, key=len, reverse=True)
+)
+
+
+def _extract_verbed_cn_names(text: str, *, limit: int = 8) -> List[str]:
+    """剧情句中「朱塞佩看见…」「老周赶走…」类 2～4 字人名。"""
+    blob = text or ""
+    if not blob:
+        return []
+    patterns = (
+        rf"([\u4e00-\u9fff]{{2,4}})(?={_VERB_AFTER_NAME_RE})",
+        r"(?:与|和|对|向|叫|唤|令|让|帮|请|找)([\u4e00-\u9fff]{2,4})",
+    )
+    found: List[str] = []
+    for pat in patterns:
+        for m in re.finditer(pat, blob):
+            n = (m.group(1) or "").strip()
+            if not n or not _is_narrative_cast_candidate(n, context=blob):
+                continue
+            if n not in found:
+                found.append(n)
+            if len(found) >= limit:
+                return found
+    return found
+
+
 def extract_cast_from_narrative(text: str, *, limit: int = 8) -> List[str]:
     """从剧情文本提取人物：并列结构 + display_utils 严格扫描。"""
     from narrativeloom.utils.display_utils import extract_names_from_narrative, extract_relation_names
@@ -446,7 +555,12 @@ def extract_cast_from_narrative(text: str, *, limit: int = 8) -> List[str]:
         return []
 
     cast: List[str] = []
-    for n in _extract_dyads(blob) + _extract_quoted(blob) + _extract_new_role(blob):
+    for n in (
+        _extract_verbed_cn_names(blob, limit=limit)
+        + _extract_dyads(blob)
+        + _extract_quoted(blob)
+        + _extract_new_role(blob)
+    ):
         if n not in cast:
             cast.append(n)
     for n in extract_relation_names(blob):
@@ -459,7 +573,9 @@ def extract_cast_from_narrative(text: str, *, limit: int = 8) -> List[str]:
     ranked = sorted(cast, key=lambda n: (-_mentions(blob, n), cast.index(n)))
     out: List[str] = []
     for n in ranked:
-        if _is_person(n) and n not in out:
+        if n in out:
+            continue
+        if _is_narrative_cast_candidate(n, context=blob) or _is_person(n):
             out.append(n)
         if len(out) >= limit:
             break
@@ -566,27 +682,25 @@ def _sculptor_fill_candidates(
     anchors: List[str],
     cross: str,
     full: str,
+    allowlist: Optional[List[str]] = None,
 ) -> List[str]:
-    """塑造师块中可用于补位的合法姓名（不含已锁定/叙事既定者）。"""
+    """塑造师块中可用于补位的合法姓名（须出现在跨职能白名单内）。"""
     anchor_set = set(anchors)
+    allowed = list(allowlist or anchors)
+    allow_set = set(allowed)
     out: List[str] = []
     for name, line in valid_lines.items():
         desc = line.split("：", 1)[-1] if "：" in line else ""
         if name in anchor_set or name in out:
             continue
+        resolved = _resolve_cast_name(name, anchors, context=cross) or name
+        if resolved not in allow_set and name not in allow_set:
+            continue
         if not _valid_sculptor_entry(name, desc):
             continue
         if _is_blocked_sculptor_invention(name, anchors=anchors, cross=cross):
             continue
-        out.append(name)
-    if not out:
-        for name in extract_cast_from_narrative(valid_lines and "\n".join(valid_lines.values()) or "", limit=8):
-            if name in anchor_set or name in out:
-                continue
-            if _is_narrative_cast_candidate(name, context=full) and not _is_blocked_sculptor_invention(
-                name, anchors=anchors, cross=cross
-            ):
-                out.append(name)
+        out.append(resolved if resolved in allow_set else name)
     return out
 
 
@@ -693,9 +807,17 @@ def complete_sculptor_section(
         plot_sources=list(plot_sources or []),
         setting_context=setting_context,
     )
+    allowlist = list(anchors)
+    allow_set = set(allowlist)
     valid_lines = parse_colon_lines(body, context=full)
+    valid_lines = {
+        k: v
+        for k, v in valid_lines.items()
+        if k in allow_set
+        or _resolve_cast_name(k, anchors, context=cross) in allow_set
+    }
     fill_candidates = _sculptor_fill_candidates(
-        valid_lines, anchors=anchors, cross=cross, full=full
+        valid_lines, anchors=anchors, cross=cross, full=full, allowlist=allowlist
     )
 
     cast: List[str] = []

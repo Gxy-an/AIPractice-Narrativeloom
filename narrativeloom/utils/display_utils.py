@@ -114,6 +114,60 @@ def typified_characters_meaningful(val: Any) -> bool:
     return named >= 2
 
 
+def sanitize_typified_characters(
+    text: Any,
+    *,
+    target: int = 2,
+    locked_names: Optional[List[str]] = None,
+    seed: str = "",
+    setting: str = "",
+    key_events: str = "",
+) -> str:
+    """过滤类型化 characters 中的非人物条目，补满目标人数。"""
+    from narrativeloom.domain.character_names import (
+        _fallback_supplementary_name,
+        is_false_person_name,
+        merge_unique_names,
+    )
+
+    raw = coerce_display_text(text).strip()
+    context = f"{seed}\n{setting}\n{key_events}\n{raw}"
+    locked = merge_unique_names(list(locked_names or []))
+    target = max(2, min(int(target), 8))
+    kept: List[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def _push(name: str, desc: str) -> None:
+        n = (name or "").strip()
+        d = (desc or "").strip()
+        if not n or n in seen or is_false_person_name(n, context=f"{n}\n{d}\n{context}"):
+            return
+        seen.add(n)
+        kept.append((n, d if d else "本节出场人物"))
+
+    for lk in locked:
+        if lk and lk not in seen:
+            _push(lk, "承接前文既定人物，本节须保留")
+    for entry in _split_character_entries(raw):
+        line = entry.lstrip("-·• ").strip()
+        if not line or "：" not in line and ":" not in line:
+            continue
+        line = line.replace(":", "：")
+        name, _, desc = line.partition("：")
+        _push(name.strip(), desc.strip())
+
+    cast_names = [n for n, _ in kept]
+    while len(cast_names) < target:
+        extra = _fallback_supplementary_name(cast_names, full=context, seed=seed)
+        if extra in cast_names:
+            break
+        _push(extra, "本节新出场或补充角色")
+        cast_names = [n for n, _ in kept]
+
+    lines = [f"- {n}：{d}" for n, d in kept[:target]]
+    return "\n".join(lines) if lines else raw
+
+
 def key_events_to_bullets(text: Any) -> str:
     """将核心事件整理为多行，每行以「· 」开头（Markdown 下行尾两空格换行，便于阅读）。"""
     raw = coerce_display_text(text)
