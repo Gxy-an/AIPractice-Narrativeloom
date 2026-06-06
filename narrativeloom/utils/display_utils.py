@@ -126,6 +126,7 @@ def sanitize_typified_characters(
     """过滤类型化 characters 中的非人物条目，补满目标人数。"""
     from narrativeloom.domain.character_names import (
         _fallback_supplementary_name,
+        _scrub_cast_name,
         is_false_person_name,
         merge_unique_names,
     )
@@ -138,9 +139,12 @@ def sanitize_typified_characters(
     seen: set[str] = set()
 
     def _push(name: str, desc: str) -> None:
-        n = (name or "").strip()
+        cast_so_far = [n for n, _ in kept]
+        n = _scrub_cast_name(name, cast_so_far, context=f"{desc}\n{context}")
         d = (desc or "").strip()
-        if not n or n in seen or is_false_person_name(n, context=f"{n}\n{d}\n{context}"):
+        if not n or n in seen:
+            return
+        if is_false_person_name(n, context=f"{n}\n{d}\n{context}"):
             return
         seen.add(n)
         kept.append((n, d if d else "本节出场人物"))
@@ -157,9 +161,12 @@ def sanitize_typified_characters(
         _push(name.strip(), desc.strip())
 
     cast_names = [n for n, _ in kept]
+    plot_context = f"{seed}\n{setting}\n{key_events}"
     while len(cast_names) < target:
-        extra = _fallback_supplementary_name(cast_names, full=context, seed=seed)
-        if extra in cast_names:
+        extra = _fallback_supplementary_name(
+            cast_names, full=context, seed=seed, narrative=plot_context
+        )
+        if not extra or extra in cast_names:
             break
         _push(extra, "本节新出场或补充角色")
         cast_names = [n for n, _ in kept]
@@ -1051,8 +1058,11 @@ _VERB_NAME_TAIL = re.compile(
 )
 _SINGLE_CHAR_VERB_TAIL = frozenset(
     "无犯却实说问看听走来去等地得了着过等后前中外首因与时第用制抓止住说面向施触试图觉察"
+    "惊认慌怒喜怕抖颤愣呆愣喊叫骂踢砸冲追掏签绑拖挣举"
 )
-_SCULPTOR_GLUED_VERB = frozenset("面向施触试图觉察往到见的地得了着过")
+_SCULPTOR_GLUED_VERB = frozenset(
+    "面向施触试图觉察往到见的地得了着过惊认慌怒喜怕抖颤愣喊叫骂踢砸冲追掏签绑拖挣举"
+)
 _SCENE_GLUED_ON_NAME = frozenset("古国城馆厅室皇朝代纪世疆镇村寺塔堡域油魂")
 _BOGUS_NAME_PREFIX = re.compile(r"^(曾是|原来|曾经|如今|以前|当时|当年|其中|作为|一位|一名|一名叫)")
 _STANDALONE_ROLE_LABEL = frozenset(

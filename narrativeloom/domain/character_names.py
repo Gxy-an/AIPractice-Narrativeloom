@@ -144,7 +144,7 @@ _OBJECT_LIKE_NAME = re.compile(
     r"桌|椅|凳|床|柜|架|栏|门|窗|墙|砖|瓦|柱|梁|梯|锁|匙|钥|镜|钟|表|"
     r"伞|扇|绳|线|链|环|针|钉|锤|斧|铲|刀|剪|包|袋|布|毯|席|垫|"
     r"树|花|草|叶|石|岩|沙|泥|土|水|火|烟|雾|雨|雪|风|云|月|日|星|"
-    r"照|片|书|本|页|纸|笔|墨|画|卷|"
+    r"照|片|书|本|页|纸|笔|墨|画|卷|墨|水|"
     r")$"
 )
 
@@ -170,6 +170,8 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
     if len(n) == 3 and n[0] == "周" and n[2] in "上下":
         return True
     if _OBJECT_LIKE_NAME.match(n):
+        return True
+    if n in ("墨水", "红墨", "颜料", "骨片", "银币"):
         return True
     if _DESCRIPTOR_NAME.search(n):
         return True
@@ -204,7 +206,9 @@ def _is_locked_cast_name(
 
 _SCENE_FRAGMENT = re.compile(
     r"(猪圈|墙上|壁画|视频|作画|模特|晚餐|颜料|偷|拍|在猪|圈作|圈墙|的达|芬奇|"
-    r"乡村|城镇|城市|地区|场景|地点|时间|型号|系列|编号)"
+    r"乡村|城镇|城市|地区|场景|地点|时间|型号|系列|编号|"
+    r"要毁|毁掉|毁颜|颜料|威胁|关键|剧情|本节|出场|行动|动机|"
+    r"铁匠|管事|庄园|契约|墨水|红墨)"
 )
 
 
@@ -212,6 +216,8 @@ def _looks_like_scene_fragment(name: str) -> bool:
     n = (name or "").strip()
     if not n or _is_compound_cast_name(n):
         return False
+    if len(n) >= 3 and n[-1] in "前后里外中内":
+        return True
     return bool(_SCENE_FRAGMENT.search(n))
 
 
@@ -248,7 +254,11 @@ def _is_narrative_cast_candidate(name: str, *, context: str = "") -> bool:
         return True
     if re.search(r"[·．\.]", n):
         return False
-    if len(n) < 2 or len(n) > 4:
+    if len(n) < 2:
+        return False
+    if len(n) > 4 and not re.search(r"(陌生人|人影|身影|老者|少年|女子|男子|掌柜|店主)$", n):
+        return False
+    if len(n) > 6:
         return False
     if re.search(r"(的$|地$|得$|着$|了$|过$|在$|把$|被$|与$|和$|及$|或$)", n):
         return False
@@ -451,6 +461,8 @@ def _is_seed_cast_name(name: str, *, context: str = "") -> bool:
     ctx = (context or "").strip()
     if not ctx or n not in ctx:
         return False
+    if re.search(rf"[-·•]\s*{re.escape(n)}\s*：", ctx):
+        return False
     if _DESCRIPTOR_NAME.search(n):
         return False
     if re.match(rf"^{re.escape(n)}(?=[在将向对把被给让与和、，,。；：:\s]|$)", ctx):
@@ -486,38 +498,14 @@ _VERB_AFTER_NAME = (
     "威胁",
     "发现",
     "赶走",
+    "砸碎",
+    "停在",
     "偷拍",
     "遇到",
     "遇见",
-    "说",
-    "道",
-    "问",
-    "答",
-    "被",
-    "把",
-    "向",
-    "对",
-    "遇",
-    "赶",
-    "踢",
-    "骂",
-    "打",
-    "拦",
-    "挡",
-    "画",
-    "写",
-    "读",
-    "听",
-    "拿",
-    "举",
-    "站",
-    "走",
-    "跑",
-    "来",
-    "去",
-    "坐",
-    "哭",
-    "笑",
+    "见到",
+    "拿出",
+    "掏出",
 )
 _VERB_AFTER_NAME_RE = "|".join(
     sorted({re.escape(v) for v in _VERB_AFTER_NAME}, key=len, reverse=True)
@@ -531,6 +519,8 @@ def _extract_verbed_cn_names(text: str, *, limit: int = 8) -> List[str]:
         return []
     patterns = (
         rf"([\u4e00-\u9fff]{{2,4}})(?={_VERB_AFTER_NAME_RE})",
+        r"([\u4e00-\u9fff]{2,4})(?=见[\u4e00-\u9fff])",
+        r"(?:店主|掌柜|老板|管事|神父|铁匠)([\u4e00-\u9fff]{2,4})",
         r"(?:与|和|对|向|叫|唤|令|让|帮|请|找)([\u4e00-\u9fff]{2,4})",
     )
     found: List[str] = []
@@ -635,16 +625,20 @@ def _build_sculptor_allowlist(
     body: str = "",
 ) -> List[str]:
     """人物塑造师允许出现的姓名：种子/锁定优先，其余须出现在其它职能叙事中。"""
-    _ = body
     narrative = "\n".join(s for s in (plot_sources or []) if (s or "").strip())
-    cross = "\n".join(x for x in (seed, narrative, setting_context) if (x or "").strip())
+    cross = "\n".join(
+        x for x in (seed, body, narrative, setting_context) if (x or "").strip()
+    )
+    plot_cross = "\n".join(
+        x for x in (seed, narrative, setting_context) if (x or "").strip()
+    )
     anchors = merge_unique_names(list(locked_names or []), extract_seed_cast_names(seed))
     allow: List[str] = []
     for n in anchors:
         if n and n not in allow:
             allow.append(n)
-    for raw in extract_cast_from_narrative(cross, limit=12):
-        resolved = _resolve_cast_name(raw, anchors, context=cross)
+    for raw in extract_cast_from_narrative(plot_cross, limit=12):
+        resolved = _resolve_cast_name(raw, anchors, context=plot_cross)
         if resolved and resolved not in allow:
             allow.append(resolved)
     for a in list(anchors):
@@ -704,10 +698,75 @@ def _sculptor_fill_candidates(
     return out
 
 
-def _fallback_supplementary_name(existing: List[str], *, full: str, seed: str) -> str:
-    """人数仍不足时，从设定/剧情角色词推断一个不与既有重复的中文名。"""
-    blob = f"{seed}\n{full}"
+def _cast_name_collides(existing: List[str], candidate: str) -> bool:
+    """同一人物的不同误拆写法（马可 / 马可·猪倌 / 马可惊）视为冲突。"""
+    c = (candidate or "").strip()
+    if not c:
+        return True
+    c_root = re.split(r"[·．\.]", c, maxsplit=1)[0]
+    for raw in existing:
+        e = (raw or "").strip()
+        if not e:
+            continue
+        if c == e:
+            return True
+        e_root = re.split(r"[·．\.]", e, maxsplit=1)[0]
+        if len(c_root) >= 2 and len(e_root) >= 2 and c_root == e_root and c != e:
+            return True
+        if len(c) >= 2 and len(e) >= 2 and (e.startswith(c) or c.startswith(e)) and c != e:
+            return True
+    return False
+
+
+def _scrub_cast_name(name: str, existing: List[str], *, context: str = "") -> str:
+    """规整姓名并剔除动词粘连、前缀重复、占位配角名等。"""
+    from narrativeloom.utils.display_utils import _canonical_person_name, _normalize_sculptor_line_name
+
+    raw = (name or "").strip()
+    if not raw or re.fullmatch(r"配角\d+", raw):
+        return ""
+    if _is_compound_cast_name(raw) or _is_seed_cast_name(raw, context=context):
+        canon = raw
+    else:
+        canon = _normalize_sculptor_line_name(raw, context=context) or _canonical_person_name(raw)
+        if not canon and _is_narrative_cast_candidate(raw, context=context):
+            canon = raw
+    if not canon or re.fullmatch(r"配角\d+", canon):
+        return ""
+    if is_false_person_name(canon, context=f"{canon}\n{context}"):
+        return ""
+    if _looks_like_scene_fragment(canon):
+        return ""
+    if not (
+        _is_narrative_cast_candidate(canon, context=context)
+        or _is_seed_cast_name(canon, context=context)
+        or _is_compound_cast_name(canon)
+        or re.search(r"(陌生人|人影|身影)$", canon)
+    ):
+        return ""
+    if _cast_name_collides(existing, canon):
+        return ""
+    return canon
+
+
+def _fallback_supplementary_name(
+    existing: List[str],
+    *,
+    full: str,
+    seed: str,
+    narrative: str = "",
+) -> str:
+    """人数仍不足时，优先从剧情/设定叙事中提取尚未入列的真实姓名。"""
+    plot_blob = "\n".join(x for x in (seed, narrative) if (x or "").strip())
+    for n in extract_cast_from_narrative(plot_blob, limit=16):
+        clean = _scrub_cast_name(n, existing, context=plot_blob)
+        if clean:
+            return clean
     role_hints = (
+        "铁匠",
+        "管家",
+        "神父",
+        "商人",
         "房东",
         "老板",
         "管事",
@@ -722,18 +781,13 @@ def _fallback_supplementary_name(existing: List[str], *, full: str, seed: str) -
         "路人",
     )
     for hint in role_hints:
-        if hint not in blob:
+        if hint not in plot_blob:
             continue
-        for m in re.finditer(rf"({hint}[\u4e00-\u9fff]{{0,2}})", blob):
-            cand = m.group(1)
-            if len(cand) >= 2 and cand not in existing and _is_narrative_cast_candidate(cand, context=blob):
-                return cand
-    idx = len(existing) + 1
-    generic = f"配角{idx}"
-    while generic in existing:
-        idx += 1
-        generic = f"配角{idx}"
-    return generic
+        for m in re.finditer(rf"({hint}[\u4e00-\u9fff]{{0,2}})", plot_blob):
+            clean = _scrub_cast_name(m.group(1), existing, context=plot_blob)
+            if clean:
+                return clean
+    return ""
 
 
 def _brief_trait(name: str, context: str) -> str:
@@ -809,13 +863,26 @@ def complete_sculptor_section(
     )
     allowlist = list(anchors)
     allow_set = set(allowlist)
-    valid_lines = parse_colon_lines(body, context=full)
-    valid_lines = {
-        k: v
-        for k, v in valid_lines.items()
-        if k in allow_set
-        or _resolve_cast_name(k, anchors, context=cross) in allow_set
-    }
+    narrative_only = narrative.strip()
+    parsed_body = parse_colon_lines(body, context=full)
+    valid_lines: Dict[str, str] = {}
+    for k, v in parsed_body.items():
+        clean = _scrub_cast_name(k, anchors, context=full)
+        if not clean:
+            continue
+        resolved = _resolve_cast_name(clean, anchors, context=cross) or clean
+        if resolved in allow_set or clean in allow_set:
+            valid_lines[resolved if resolved in allow_set else clean] = v
+        elif _is_compound_cast_name(clean) or _is_seed_cast_name(clean, context=full):
+            valid_lines[clean] = v
+        elif narrative_only and clean in narrative_only and not _is_blocked_sculptor_invention(
+            clean, anchors=anchors, cross=narrative_only
+        ):
+            valid_lines[clean] = v
+    for clean in valid_lines:
+        if clean not in allowlist:
+            allowlist.append(clean)
+            allow_set.add(clean)
     fill_candidates = _sculptor_fill_candidates(
         valid_lines, anchors=anchors, cross=cross, full=full, allowlist=allowlist
     )
@@ -824,18 +891,32 @@ def complete_sculptor_section(
     for n in anchors:
         if len(cast) >= target:
             break
-        resolved = _resolve_cast_name(n, anchors, context=full) or n
-        if resolved not in cast:
+        resolved = _scrub_cast_name(
+            _resolve_cast_name(n, anchors, context=full) or n, cast, context=full
+        )
+        if resolved and resolved not in cast:
             cast.append(resolved)
     for n in fill_candidates:
         if len(cast) >= target:
             break
-        resolved = _resolve_cast_name(n, anchors, context=full) or n
+        resolved = _scrub_cast_name(
+            _resolve_cast_name(n, anchors, context=full) or n, cast, context=full
+        )
+        if resolved and resolved not in cast:
+            cast.append(resolved)
+    for n in allowlist:
+        if len(cast) >= target:
+            break
+        resolved = _scrub_cast_name(
+            _resolve_cast_name(n, anchors, context=full) or n, cast, context=full
+        )
         if resolved and resolved not in cast:
             cast.append(resolved)
     while len(cast) < target:
-        extra = _fallback_supplementary_name(cast, full=full, seed=seed)
-        if extra in cast:
+        extra = _fallback_supplementary_name(
+            cast, full=setting_context, seed=seed, narrative=narrative
+        )
+        if not extra or extra in cast:
             break
         cast.append(extra)
     cast = cast[:target]

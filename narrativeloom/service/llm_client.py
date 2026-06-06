@@ -50,12 +50,14 @@ PROSE_CHARS_PER_SECTION_MIN = 800
 PROSE_CHARS_PER_SECTION_MAX = 1000
 
 _PROSE_SECTION_STYLE_ZH = (
-    "禁止平铺直叙与流水账；须穿插对话、环境氛围、人物动作与感官细节，"
-    "句式长短错落，场景有画面感与张力。"
+    "禁止平铺直叙与流水账；每小节须含至少两处带引号的对话、若干动作描写与环境氛围"
+    "（光线、气味、声响、触感等感官细节），句式长短错落，场景有画面感与张力；"
+    "用展示代替告知（show, don't tell），避免「然后…接着…」式罗列。"
 )
 _PROSE_SECTION_STYLE_EN = (
-    "Avoid flat summary narration; weave in dialogue, setting and atmosphere, "
-    "physical action, and sensory detail with varied sentence rhythm and tension."
+    "Avoid flat summary narration; each section needs at least two quoted dialogue beats, "
+    "concrete action, and sensory setting (light, sound, smell, texture); "
+    "vary sentence rhythm; show don't tell—no 'and then… and then…' event lists."
 )
 
 
@@ -1933,7 +1935,8 @@ def expand_functional_section(
     else:
         system = (
             "你是中文小说作者。根据各职能的「概述要点」拼接稿，扩写为**本小节独立叙事正文**。"
-            "多段落：场景、动作、对白与心理穿插，因果清楚，与前文摘要自然衔接。"
+            "多段落：场景、动作、对白与心理穿插，因果清楚，与前文摘要自然衔接；"
+            "至少两处引号对话，并写清环境氛围与人物动作，避免只列事件梗概。"
             f"篇幅目标 {PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字（单节正文，勿写成整章长篇）。"
             + _PROSE_SECTION_STYLE_ZH
             + "严格遵守设定清单中人物称谓；不要输出 JSON、不要复述职能标签堆砌。"
@@ -2287,6 +2290,7 @@ def expand_prose(
             "你是资深中文文学小说作者。根据小节汇编扩写为具有文学质感的长叙事："
             "句式长短错落，适当运用比喻、通感、象征与留白；"
             "环境描写服务情绪与主题，动作与心理交织，对话须有潜台词与人物口吻，"
+            "每小节至少两处引号对话，场景切换处补足光线/气味/声响等感官细节；"
             "禁止通篇「谁做了什么」的主谓宾流水账、公文腔与网络套话。"
             "在严守汇编因果与人物称谓的前提下，让场景有呼吸感与张力，意象要具体可感，"
             "可适度运用诗性语句，但避免堆砌辞藻或空洞抒情。"

@@ -73,7 +73,7 @@ def test_complete_sculptor_section_rejects_garbage_and_keeps_seed():
     locked = extract_seed_cast_names(seed)
     out = complete_sculptor_section(
         bad_body,
-        plot_sources=["猪圈墙上，沾满面粉的手在画"],
+        plot_sources=["猪圈墙上，沾满面粉的手在画，老周在一旁看守"],
         locked_names=locked,
         target=2,
         seed=seed,
@@ -92,7 +92,7 @@ def test_normalize_unified_outline_preserves_seed_protagonist():
     raw = (
         "【设定构建师】\n- 地点：猪圈\n- 时间：午后\n"
         "【人物塑造师】\n- 沾满面粉：画家\n- 炭灰：旁观者\n"
-        "【剧情逻辑师】\n- 狗剩在墙上作画"
+        "【剧情逻辑师】\n- 狗剩在墙上作画，老周在一旁看守"
     )
     out = normalize_single_unified_outline(
         raw,
@@ -112,7 +112,7 @@ def test_sculptor_rejects_llm_only_hallucinated_names():
     seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》，模特是十二头猪。"
     locked = extract_seed_cast_names(seed)
     bad_body = "- 阿依古丽威：棋盘上的红衣主教\n- 阿依古丽清：关键剧情人物"
-    plot = "- 达芬奇被酒馆赶出后闯入猪圈"
+    plot = "- 达芬奇被酒馆赶出后闯入猪圈，店主韩星将其锁在门外"
     out = complete_sculptor_section(
         bad_body,
         plot_sources=[plot],
@@ -221,7 +221,7 @@ def test_rejects_time_and_object_as_character_names():
     locked = ["李明"]
     out = complete_sculptor_section(
         "- 黎明：清晨\n- 周六下：午后\n- 陶罐：旧物",
-        plot_sources=["- 周六下午李明在陶罐旁整理"],
+        plot_sources=["- 周六下午李明在陶罐旁整理，王婶送来旧信"],
         locked_names=locked,
         target=2,
         seed=seed,
@@ -235,7 +235,7 @@ def test_rejects_time_and_object_as_character_names():
     raw = (
         "【设定构建师】\n- 地点：老宅\n- 时间：黎明\n"
         "【人物塑造师】\n- 黎明：清晨\n- 周六下：午后\n- 陶罐：旧物\n"
-        "【剧情逻辑师】\n- 周六下午李明在陶罐旁整理"
+        "【剧情逻辑师】\n- 周六下午李明在陶罐旁整理，王婶送来旧信"
     )
     normalized = normalize_single_unified_outline(
         raw,
@@ -264,7 +264,7 @@ def test_coerce_rejects_time_object_sculptor_lines():
 - 周六下：午后时光
 - 陶罐：角落旧物
 【剧情逻辑师】
-- 周六下午李明在陶罐旁整理"""
+- 周六下午李明在陶罐旁整理，王婶送来旧信"""
     out = _coerce_unified_plan_variants(
         [{"outline": raw}],
         plan_count=1,
@@ -325,14 +325,17 @@ def test_sanitize_typified_characters_filters_device():
     )
     out = sanitize_typified_characters(
         raw,
-        target=4,
+        target=3,
         locked_names=["达芬奇·狗剩"],
         seed="达芬奇·狗剩在猪圈作画",
+        key_events="黑袍陌生人从通风管现身；老周停在圈门察看",
     )
     names = _sculptor_names("【人物塑造师】\n" + out)
     assert "达芬奇·狗剩" in names
     assert "巡逻嗅探器" not in names
-    assert len(names) == 4
+    assert "黑袍陌生人" in names
+    assert len(names) >= 2
+    assert not any(n.startswith("配角") for n in names)
 
 
 def test_extract_verbed_cn_name_giuseppe():
@@ -341,3 +344,64 @@ def test_extract_verbed_cn_name_giuseppe():
     plot = "朱塞佩看见狗剩在猪圈画壁画，威胁要毁掉颜料"
     names = extract_cast_from_narrative(plot)
     assert "朱塞佩" in names
+
+
+def test_rejects_verb_glued_name_colliding_with_compound_cast():
+    from narrativeloom.domain.character_names import complete_sculptor_section, extract_seed_cast_names
+
+    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》。"
+    locked = extract_seed_cast_names(seed)
+    body = (
+        "- 达芬奇·狗剩：被绑在账房，用脚趾作画\n"
+        "- 马可·猪倌：庄园管事，逼签契约\n"
+        "- 马可惊：关键剧情人物，须在本节行动中有动机"
+    )
+    plot = "- 菲利波见达芬奇被绑，掏出红墨水，威胁要毁掉壁画"
+    out = complete_sculptor_section(
+        body,
+        plot_sources=[plot],
+        locked_names=locked,
+        target=3,
+        seed=seed,
+    )
+    names = _sculptor_names(out)
+    assert len(names) == 3
+    assert "达芬奇·狗剩" in names
+    assert "马可·猪倌" in names
+    assert "菲利波" in names
+    assert "马可惊" not in names
+    assert "马可认" not in names
+    assert not any(n.startswith("配角") for n in names)
+
+
+def test_fallback_prefers_plot_name_over_generic():
+    from narrativeloom.domain.character_names import _fallback_supplementary_name
+
+    existing = ["达芬奇·狗剩", "马可·猪倌"]
+    plot = "安东尼奥砸碎猪骨，与马可·猪倌争执"
+    name = _fallback_supplementary_name(
+        existing, full="", seed="达芬奇·狗剩在猪圈作画", narrative=plot
+    )
+    assert name == "安东尼奥"
+
+
+def test_sanitize_typified_rejects_verb_glued_duplicate():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    raw = (
+        "- 达芬奇·狗剩：被绑在账房\n"
+        "- 马可·猪倌：庄园管事\n"
+        "- 马可惊：误拆姓名\n"
+        "- 菲利波：铁匠"
+    )
+    out = sanitize_typified_characters(
+        raw,
+        target=3,
+        locked_names=["达芬奇·狗剩"],
+        seed="达芬奇·狗剩在猪圈作画",
+        key_events="菲利波见达芬奇被绑，安东尼奥在旁砸骨",
+    )
+    names = _sculptor_names("【人物塑造师】\n" + out)
+    assert "马可·猪倌" in names
+    assert "马可惊" not in names
+    assert not any(n.startswith("配角") for n in names)
