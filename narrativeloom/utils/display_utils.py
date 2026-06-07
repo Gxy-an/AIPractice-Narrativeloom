@@ -136,23 +136,6 @@ def _is_placeholder_character_desc(desc: str) -> bool:
     return any(p in d for p in _PLACEHOLDER_CHARACTER_DESC)
 
 
-def _desc_echoes_setting(desc: str, setting: str) -> bool:
-    """人物简介误粘贴设定构建师正文（地点/时间/场景）。"""
-    d = (desc or "").strip()
-    if not d:
-        return False
-    if re.search(r"^本节主要人物[，,]?身处", d):
-        return True
-    if re.match(r"^(地点|时间|场景|规则)[：:]", d):
-        return True
-    for ln in (setting or "").splitlines():
-        t = re.sub(r"^[-*•·]\s*", "", ln.strip())
-        t = re.sub(r"^(地点|时间|场景|规则)[：:]\s*", "", t)
-        if len(t) >= 10 and (t[:18] in d or d[:18] in t):
-            return True
-    return False
-
-
 def _plain_setting_hint(setting: str) -> str:
     parts: List[str] = []
     for ln in (setting or "").splitlines():
@@ -180,7 +163,7 @@ def _resolve_character_description(
     if prior:
         return prior
     d = (desc or "").strip()
-    if d and not _is_placeholder_character_desc(d) and not _desc_echoes_setting(d, setting):
+    if d and not _is_placeholder_character_desc(d):
         return d
     if raw_map:
         for k, v in raw_map.items():
@@ -208,9 +191,7 @@ def _resolve_character_description(
             tail = sent.split(name, 1)[-1].strip("，,：: 在将向对")
             if 2 <= len(tail) <= 26 and not _is_placeholder_character_desc(tail):
                 return tail[:26]
-    if setting and len(setting.strip()) >= 6 and _name_appears_in_narrative(
-        name, seed=seed, key_events=key_events, locked=list((prior_profiles or {}).keys())
-    ):
+    if setting and len(setting.strip()) >= 6:
         return f"本节主要人物，身处{_plain_setting_hint(setting) or setting[:22].rstrip('，,；; ')}"
     return "本节主要人物，行动推动当前情节"
 
@@ -342,6 +323,8 @@ def sanitize_typified_characters(
     key_events: str = "",
     prior_characters_block: str = "",
     strict_narrative_allowlist: bool = False,
+    allow_body_unanchored: bool = False,
+    plan_index: int = 0,  # 新参数：计划索引，用于名字多样性
 ) -> str:
     """过滤类型化 characters 中的非人物条目，补满目标人数。"""
     from narrativeloom.domain.character_names import (
@@ -367,6 +350,7 @@ def sanitize_typified_characters(
         plot_sources=[key_events],
         setting_context=setting,
         body=raw,
+        allow_body_unanchored=allow_body_unanchored,
     )
     allow_set: set[str] = set(plot_allowlist)
     raw_map: Dict[str, str] = {}
@@ -389,12 +373,10 @@ def sanitize_typified_characters(
             return
         if is_false_person_name(n, context=f"{n}\n{desc}\n{context}"):
             return
-        resolved_anchor = _resolve_cast_name(n, locked, context=context) or n
-        if _desc_echoes_setting(desc, setting) and n not in locked and resolved_anchor not in locked:
-            return
         if _is_meta_character_label(n):
             return
         if strict_narrative_allowlist:
+            resolved_anchor = _resolve_cast_name(n, locked, context=context) or n
             in_allow = n in allow_set or resolved_anchor in allow_set
             in_locked = n in locked or resolved_anchor in locked
             if not in_allow and not in_locked:
@@ -403,6 +385,7 @@ def sanitize_typified_characters(
             if not _name_appears_in_narrative(
                 n, seed=seed, key_events=key_events, locked=locked
             ):
+                resolved_anchor = _resolve_cast_name(n, locked, context=context) or n
                 if not _name_appears_in_narrative(
                     resolved_anchor, seed=seed, key_events=key_events, locked=locked
                 ):
@@ -428,7 +411,7 @@ def sanitize_typified_characters(
     cast_names = [n for n, _ in kept]
     plot_context = f"{seed}\n{setting}\n{key_events}"
     fill_sources = list(_fallback_supplementary_names(
-        cast_names, full=context, seed=seed, narrative=plot_context, limit=target * 2
+        cast_names, full=context, seed=seed, narrative=plot_context, limit=target * 2, plan_index=plan_index
     ))
     for n in plot_allowlist:
         if n not in cast_names and n not in fill_sources:
@@ -446,7 +429,7 @@ def sanitize_typified_characters(
         cast_names = [n for n, _ in kept]
     while len(cast_names) < target:
         extra = _fallback_supplementary_name(
-            cast_names, full=context, seed=seed, narrative=plot_context
+            cast_names, full=context, seed=seed, narrative=plot_context, plan_index=plan_index
         )
         if not extra or extra in cast_names:
             break
@@ -1345,10 +1328,10 @@ _VERB_NAME_TAIL = re.compile(
 )
 _SINGLE_CHAR_VERB_TAIL = frozenset(
     "无犯却实说问看听走来去等地得了着过等后前中外首因与时第用制抓止住说面向施触试图觉察"
-    "惊认慌怒喜怕抖颤愣呆愣喊叫骂踢砸冲追掏签绑拖挣举撞"
+    "惊认慌怒喜怕抖颤愣呆愣喊叫骂踢砸冲追掏签绑拖挣举撞收检藏协查助办取送"
 )
 _SCULPTOR_GLUED_VERB = frozenset(
-    "面向施触试图觉察往到见的地得了着过惊认慌怒喜怕抖颤愣喊叫骂踢砸冲追掏签绑拖挣举撞"
+    "面向施触试图觉察往到见的地得了着过惊认慌怒喜怕抖颤愣喊叫骂踢砸冲追掏签绑拖挣举撞收检藏协查助办取送都起"
 )
 _SCENE_GLUED_ON_NAME = frozenset("古国城馆厅室皇朝代纪世疆镇村寺塔堡域油魂")
 _BOGUS_NAME_PREFIX = re.compile(r"^(曾是|原来|曾经|如今|以前|当时|当年|其中|作为|一位|一名|一名叫)")
@@ -1493,10 +1476,17 @@ def _trim_scene_glued_suffix_from_name(name: str) -> str:
 
 
 def _strip_glued_verb_from_name(name: str) -> str:
-    """剥离误粘在姓名末尾的动词字（艾买提面→艾买提）。"""
+    """剥离误粘在姓名末尾的动词字（艾买提面→艾买提；阿依古都→阿依古丽）。
+    
+    使用两层策略：
+    1. 集合匹配：检查末尾字符是否在已知动词集合中
+    2. 启发式：如果名字长度>4，尝试剥离末尾字符直到得到2-4字有效名字或受保护复合名
+    """
     n = (name or "").strip()
     if not n or _is_protected_compound_name(n):
         return n
+    
+    # 第一层：集合匹配（快速路径）
     for _ in range(4):
         if len(n) >= 3 and n[-1] in _SCULPTOR_GLUED_VERB:
             base = n[:-1]
@@ -1506,6 +1496,26 @@ def _strip_glued_verb_from_name(name: str) -> str:
                 n = base
                 continue
         break
+    
+    # 第二层：仅当末尾字像动词粘连时继续剥离（避免把「黑袍陌生人」截成「黑袍」）
+    if len(n) > 4:
+        original = n
+        while len(n) > 4 and n[-1] in (_SCULPTOR_GLUED_VERB | _SINGLE_CHAR_VERB_TAIL):
+            candidate = n[:-1]
+            if _is_protected_compound_name(candidate):
+                n = candidate
+                break
+            if (
+                2 <= len(candidate) <= 4
+                and _STRICT_PERSON_NAME.fullmatch(candidate)
+                and _looks_like_person_name(candidate)
+            ):
+                n = candidate
+                break
+            n = candidate
+        if len(n) < 2:
+            n = original
+    
     return _trim_scene_glued_suffix_from_name(n)
 
 
@@ -2459,6 +2469,7 @@ def complete_sculptor_body(
     sculpt_target: int = 2,
     seed: str = "",
     prior_character_profiles: Optional[Dict[str, str]] = None,
+    plan_index: int = 0,  # 新参数：计划索引，用于名字多样性
 ) -> str:
     plot = list(plot_sources or [])
     plot_blob = _plot_narrative_for_cast(plot)
@@ -2477,6 +2488,8 @@ def complete_sculptor_body(
         key_events=plot_blob,
         prior_characters_block=prior_block,
         strict_narrative_allowlist=True,
+        allow_body_unanchored=True,
+        plan_index=plan_index,  # 传递计划索引以支持多样性
     )
     return scrub_functional_fragment(out)
 
@@ -2670,45 +2683,6 @@ def _looks_like_story_outline(text: str) -> bool:
     return False
 
 
-def merge_functional_cast_into_outline(
-    cast: str,
-    outline: str,
-    *,
-    role_names: Optional[List[str]] = None,
-    lang: str = "zh",
-) -> str:
-    """功能化「先定 cast、再写故事」：将独立 cast 字段注入为人物塑造师分块。"""
-    from narrativeloom.domain.personas import is_character_sculptor_role
-
-    cast_body = scrub_functional_fragment((cast or "").strip())
-    outline_txt = (outline or "").strip()
-    if not cast_body:
-        return outline_txt
-    sculptor_rn = None
-    for rn in role_names or []:
-        if is_character_sculptor_role(rn, lang):
-            sculptor_rn = rn
-            break
-    if not sculptor_rn:
-        sculptor_rn = "Character Sculptor" if lang == "en" else "人物塑造师"
-    sections = parse_merge_role_sections(outline_txt, role_names=role_names)
-    filtered = [(t, b) for t, b in sections if not _is_sculptor_section_title(t)]
-    order = _known_role_names(role_names)
-    if not order:
-        return f"【{sculptor_rn}】\n{cast_body}\n\n{outline_txt}".strip()
-    out_sections: List[Tuple[str, str]] = []
-    for rn in order:
-        if _is_continuity_section_title(f"【{rn}】"):
-            continue
-        if is_character_sculptor_role(rn, lang):
-            out_sections.append((f"【{rn}】", cast_body))
-        else:
-            body = _find_section_body(filtered, rn)
-            if (body or "").strip():
-                out_sections.append((f"【{rn}】", body))
-    return rebuild_merge_sections(out_sections) if out_sections else outline_txt
-
-
 def normalize_single_unified_outline(
     text: str,
     *,
@@ -2719,6 +2693,7 @@ def normalize_single_unified_outline(
     beat_index: int = 0,
     seed: str = "",
     prior_character_profiles: Optional[Dict[str, str]] = None,
+    plan_index: int = 0,  # 新参数：计划索引，用于名字多样性
 ) -> str:
     """清洗单份总体方案：截断杂糅、补全人物塑造师、规范分块。"""
     txt = scrub_functional_fragment(strip_trailing_json_leak(unescape_display_text(text)))
@@ -2786,6 +2761,7 @@ def normalize_single_unified_outline(
                 sculpt_target=sculpt_target,
                 seed=seed,
                 prior_character_profiles=prior_character_profiles,
+                plan_index=plan_index,  # 传递计划索引以支持多样性
             )
             if beat_index > 0:
                 body = abbreviate_established_sections(

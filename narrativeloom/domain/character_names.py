@@ -15,7 +15,6 @@ _REJECT_NAME_FRAG = re.compile(
     r"氛围|道具|伏笔|因果|逻辑|对话|提醒|拓展|节点|抉择|样本|陈列|诚信|突破|原则|"
     r"严谨|务实|状态|动机|性格|工程|计划$|程计划|"
     r"交换|分享|交易|传递|假装|佯装|装作|"
-    r"飘着|散着|弥漫着|悬浮|漂浮|监控|半透明|"
     r"(?<![\u4e00-\u9fff])(?:队员|教授|工程师|研究员|研究生|生命体)$)"
 )
 _ACTION_OR_NOUN_NAME = frozenset(
@@ -95,8 +94,6 @@ _DESCRIPTOR_NAME = re.compile(
     r"双手|一手|一手|背景|前景|画面|构图|颜料|墙壁|墙皮|泥墙|"
     r"严谨|务实|当前|本节|状态|动机|性格|身份|任务|张力|高潮|转折|悬念|"
     r"核心|戏剧|情节|剧情|伏笔|主题|矛盾|冲突|节奏|"
-    r"任何|飘着|散着|弥漫|悬浮|漂浮|麦秸|半透明|"
-    r"时被|当时|当夜|当被|"
     r"黎明|黄昏|清晨|午夜|正午|凌晨|傍晚|拂晓|深夜|白天|夜晚|上午|下午|中午|"
     r"周一|周二|周三|周四|周五|周六|周日|周天|"
     r"周[一二三四五六日天][上下]?|"
@@ -196,17 +193,6 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
         return True
     if n in _ACTION_OR_NOUN_NAME:
         return True
-    if re.match(r"^任何", n):
-        return True
-    if re.match(r"^(?:飘着|散着|弥漫着|悬浮着|漂浮着)", n):
-        return True
-    if re.match(r"^(?:时被|当时|当夜|当被|时[被让叫给])", n):
-        return True
-    if len(n) <= 3 and n.endswith("中") and re.search(r"[监控控检]", n):
-        return True
-    if len(n) <= 3 and n.endswith("中") and re.search(r"监控", context or ""):
-        if n in (context or ""):
-            return True
     if re.search(r"假装|佯装|装作", n):
         return True
     if n.endswith("警") and len(n) <= 5:
@@ -749,6 +735,7 @@ def _build_sculptor_allowlist(
     plot_sources: List[str],
     setting_context: str = "",
     body: str = "",
+    allow_body_unanchored: bool = False,
 ) -> List[str]:
     """人物塑造师允许出现的姓名：种子/锁定优先，其余须出现在其它职能叙事中。"""
     narrative = "\n".join(s for s in (plot_sources or []) if (s or "").strip())
@@ -775,6 +762,7 @@ def _build_sculptor_allowlist(
                 continue
             if not _valid_sculptor_entry(name, desc):
                 continue
+            # 在功能化塑造师场景下，允许正文中出现且通过校验的姓名成为 allowlist（即使未出现在其它叙事片段中）
             grounded = (
                 name in plot_cross
                 or any(
@@ -784,6 +772,7 @@ def _build_sculptor_allowlist(
                 )
                 or _is_compound_cast_name(name)
                 or name in anchors
+                or (allow_body_unanchored and name in body)
             )
             if not grounded:
                 continue
@@ -911,9 +900,6 @@ def _scrub_cast_name(name: str, existing: List[str], *, context: str = "") -> st
         return ""
     if _INVALID_NAME_PREFIX.match(raw):
         return ""
-    prefixed = re.match(r"^(?:时[被让叫给]|被|让|叫|给])([\u4e00-\u9fff]{2,4})$", raw)
-    if prefixed:
-        raw = prefixed.group(1)
     if re.search(r"假装|佯装|装作", raw):
         m = re.search(r"([\u4e00-\u9fff]{2,4})假装", context)
         if m:
@@ -988,16 +974,40 @@ def _fallback_supplementary_names(
     seed: str,
     narrative: str = "",
     limit: int = 12,
+    plan_index: int = 0,  # 新参数：计划索引，用于名字多样性
 ) -> List[str]:
-    """从剧情/设定叙事中提取可用于补位的真实姓名（按优先级排序）。"""
+    """从剧情/设定叙事中提取可用于补位的真实姓名（按优先级排序）。
+    
+    使用 plan_index 进行随机播放以实现计划间的名字多样性。
+    """
+    import random
+    from collections import defaultdict
+    
     plot_blob = "\n".join(x for x in (seed, narrative, full) if (x or "").strip())
     ranked = [
         n
         for n in extract_cast_from_narrative(plot_blob, limit=16)
         if _is_narrative_cast_candidate(n, context=plot_blob)
     ]
+    
+    # 按长度分组，然后在每个长度组内根据 plan_index 进行随机排列
+    by_length = defaultdict(list)
+    for i, n in enumerate(ranked):
+        by_length[len(n)].append((i, n))
+    
+    # 按长度降序处理（优先选择较长的名字）；plan_index=0 保持提取顺序，>0 时在组内打散以增加方案间差异
+    result_with_index = []
+    for length in sorted(by_length.keys(), reverse=True):
+        group = by_length[length]
+        if plan_index > 0:
+            rng = random.Random(hash((seed, length, plan_index)))
+            rng.shuffle(group)
+        else:
+            group = sorted(group, key=lambda item: item[0])
+        result_with_index.extend(group)
+    
     out: List[str] = []
-    for _, n in sorted(enumerate(ranked), key=lambda item: (-len(item[1]), item[0])):
+    for _, n in result_with_index:
         if _is_subname_of_compound_cast(n, existing + out):
             continue
         clean = _scrub_cast_name(n, existing + out, context=plot_blob)
@@ -1051,10 +1061,11 @@ def _fallback_supplementary_name(
     full: str,
     seed: str,
     narrative: str = "",
+    plan_index: int = 0,  # 新参数：计划索引，用于名字多样性
 ) -> str:
     """人数仍不足时，优先从剧情/设定叙事中提取尚未入列的真实姓名。"""
     names = _fallback_supplementary_names(
-        existing, full=full, seed=seed, narrative=narrative, limit=1
+        existing, full=full, seed=seed, narrative=narrative, limit=1, plan_index=plan_index
     )
     return names[0] if names else ""
 

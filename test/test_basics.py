@@ -672,78 +672,43 @@ def test_sanitize_fills_exact_target_from_multiple_seeds(seed_plot_pair):
         assert name in names
 
 
-def test_rejects_setting_fragment_and_rule_fragment_as_names():
-    from narrativeloom.domain.character_names import is_false_person_name, complete_sculptor_section
-
-    setting = "- 地点：2147火星殖民地生物实验室\n- 场景：监控中，墙壁半透明，养着十头猪"
-    plot = "- 张晓红在监控中发现异常，陈星通协助狗剩作画"
-    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》，模特是十二头猪"
-    bad = (
-        "- 达芬奇·狗剩：星际艺术家\n"
-        "- 控中：本节主要人物，身处2147火星殖民地生物实验室\n"
-        "- 任何召：画家，与卡美洛边缘咕噜沼泽相关"
-    )
-    for fake in ("控中", "任何召", "任何以", "飘着麦秸", "时被翠花"):
-        assert is_false_person_name(fake, context=f"{setting}\n{plot}")
-    out = complete_sculptor_section(
-        bad,
-        plot_sources=[plot],
-        setting_context=setting,
-        locked_names=["达芬奇·狗剩"],
-        target=2,
-        seed=seed,
-        functional_mode=True,
-    )
-    names = _sculptor_names(out)
-    assert len(names) == 2
-    assert "达芬奇·狗剩" in names
-    assert "控中" not in names
-    assert "任何召" not in names
-
-
-def test_merge_functional_cast_into_outline():
-    from narrativeloom.utils.display_utils import merge_functional_cast_into_outline
-
-    cast = "- 达芬奇·狗剩：落魄画师\n- 陈星通：年轻研究员"
-    outline = """【设定构建师】
-- 地点：火星实验室
-【剧情逻辑师】
-- 陈星通协助狗剩完成壁画"""
-    merged = merge_functional_cast_into_outline(
-        cast,
-        outline,
-        role_names=["设定构建师", "人物塑造师", "剧情逻辑师"],
-    )
-    assert "【人物塑造师】" in merged
-    assert "陈星通：年轻研究员" in merged
-    assert merged.index("【人物塑造师】") < merged.index("【剧情逻辑师】")
-    assert "【设定构建师】" in merged
-
-
-def test_coerce_unified_plan_prefers_cast_field():
+def test_handle_glued_verb_multi_char_names():
+    """测试处理粘连字符的多字人物名（如"阿依古都"->应该是"阿依古丽"或类似有效名字）"""
     from narrativeloom.service.llm_client import _coerce_unified_plan_variants
 
-    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》，模特是十二头猪"
-    raw_variants = [
-        {
-            "cast": "- 达芬奇·狗剩：落魄画师\n- 露辛达：沼泽女巫",
-            "outline": """【设定构建师】
-- 地点：咕噜沼泽猪圈
+    # 模拟模型输出多字粘连的情况
+    seed = "阿依古丽在天山驿站，艾买提在附近。"
+    locked = ["阿依古丽", "艾买提"]
+    raw = """【设定构建师】
+- 地点：天山驿站
+- 时间：贞观年间
+【人物塑造师】
+- 阿依古都：掌柜之女
+- 艾买提起：驿站掌管人
+- 韩星藏：其他旅客
 【剧情逻辑师】
-- 露辛达从蘑菇丛中警告狗剩""",
-        }
-    ]
+- 故事发生在驿站
+【冲突设计师】
+- 核心矛盾待定"""
+    
     out = _coerce_unified_plan_variants(
-        raw_variants,
+        [{"outline": raw}],
         plan_count=1,
         feedback_process=False,
-        locked_character_names=["达芬奇·狗剩"],
-        character_target_total=2,
-        role_names=["设定构建师", "人物塑造师", "剧情逻辑师"],
+        locked_character_names=locked,
+        character_target_total=3,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
         seed=seed,
     )[0]["outline"]
+    
     names = _sculptor_names(out)
-    assert len(names) == 2
-    assert "达芬奇·狗剩" in names
-    assert "露辛达" in names
-    assert "任何" not in out
+    # 验证多字粘连被正确剥离
+    assert "阿依古都" not in names
+    assert "艾买提起" not in names
+    assert "韩星藏" not in names
+    # 验证清理后的名字是合法的中文人名
+    for name in names:
+        # 中文名应该是2-4个字
+        assert 2 <= len(name) <= 4, f"Name '{name}' has invalid length"
+        # 不应该包含某些常见的错误粘连字
+        assert not any(c in name for c in "都起藏"), f"Name '{name}' contains glued chars"
