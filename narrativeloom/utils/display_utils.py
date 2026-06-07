@@ -395,7 +395,9 @@ def sanitize_typified_characters(
 
     def _push(name: str, desc: str = "") -> None:
         cast_so_far = [n for n, _ in kept]
-        n = _scrub_cast_name(name, cast_so_far, context=f"{desc}\n{context}")
+        n = _scrub_cast_name(
+            name, cast_so_far, context=f"{desc}\n{context}", locked=locked
+        )
         if not n or n in seen:
             return
         if _is_subname_of_compound_cast(n, locked + cast_so_far):
@@ -487,7 +489,19 @@ def sanitize_typified_characters(
         key_events=key_events,
         prior_profiles=prior_profiles,
     )
-    lines = [f"- {n}：{d}" for n, d in kept]
+    cast_names = [n for n, _ in kept]
+    while len(cast_names) < target:
+        extra = _fallback_supplementary_name(
+            cast_names, full=context, seed=seed, narrative=plot_context, plan_index=plan_index
+        )
+        if not extra or extra in cast_names:
+            break
+        before = len(kept)
+        _push(extra, "")
+        if len(kept) == before:
+            break
+        cast_names = [n for n, _ in kept]
+    lines = [f"- {n}：{d}" for n, d in kept[:target]]
     return "\n".join(lines) if lines else raw
 
 
@@ -1216,7 +1230,7 @@ def scrub_expanded_prose_artifacts(text: str) -> str:
 
 
 _COPULA_STUCK_ON_NAME = frozenset("是为乃")
-_NAME_TRAILING_PARTICLE = frozenset("带进往向到见于的")
+_NAME_TRAILING_PARTICLE = frozenset("带进往向到见于的远")
 _CHAR_NAME_LINE = re.compile(
     r"^[-\s]*([^\s：:\d【】\[\]（）()]{2,12})[：:]",
     re.MULTILINE,
@@ -1383,7 +1397,8 @@ _NON_PERSON_LABELS = frozenset(
     }
 )
 _GEO_SCENE_FALSE_NAME = re.compile(
-    r"(古代|现代|当代|未来|异世|沙之|沙漠|王国|国度|学院|绿洲|纪元|时代|文明|异世界|魔法学院|沙之国度)"
+    r"(古代|现代|当代|未来|异世|沙之|沙漠|王国|国度|学院|绿洲|纪元|时代|文明|异世界|魔法学院|沙之国度|"
+    r"油田|油城|走廊|宿舍|大厅|核验|新村|管控|探井|工人村|克拉玛依|玛依)"
 )
 _SCULPTOR_PLACEHOLDER_DESC = re.compile(
     r"(待在本节|待展开|待补|性格与动机待|动机待|身份待|尚未确定|待定|待写|待补充)"
@@ -1564,6 +1579,10 @@ def _canonical_person_name(name: str) -> str:
             break
     if len(n) >= 2 and n[-1] in _COPULA_STUCK_ON_NAME:
         base = n[:-1]
+        if _STRICT_PERSON_NAME.fullmatch(base) and _looks_like_person_name(base):
+            n = base
+    if len(n) >= 4 and n.endswith("远远"):
+        base = n[:-2]
         if _STRICT_PERSON_NAME.fullmatch(base) and _looks_like_person_name(base):
             n = base
     if len(n) >= 3 and n[-1] in _NAME_TRAILING_PARTICLE:
@@ -1847,8 +1866,10 @@ def _is_valid_sculptor_person_line(name: str, description: str) -> bool:
     n = _canonical_person_name((name or "").strip())
     if _is_setting_field_label(n) or n.upper() in _EN_NAME_BLOCK:
         return False
-    from narrativeloom.domain.character_names import _is_seed_cast_name, is_false_person_name
+    from narrativeloom.domain.character_names import _is_seed_cast_name, is_false_person_name, looks_like_environment_or_place_name
 
+    if looks_like_environment_or_place_name(n, context=f"{n}\n{description}"):
+        return False
     if is_false_person_name(n, context=f"{n}\n{description}"):
         return False
     if _is_seed_cast_name(n, context=f"{n}\n{description}"):

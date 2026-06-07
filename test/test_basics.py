@@ -712,3 +712,91 @@ def test_handle_glued_verb_multi_char_names():
         assert 2 <= len(name) <= 4, f"Name '{name}' has invalid length"
         # 不应该包含某些常见的错误粘连字
         assert not any(c in name for c in "都起藏"), f"Name '{name}' contains glued chars"
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "走廊尽头",
+        "走廊深处",
+        "玛依油田",
+        "导师宿舍",
+        "苏联",
+        "核验大厅",
+    ],
+)
+def test_rejects_environment_and_place_as_person_names(bad_name):
+    from narrativeloom.domain.character_names import (
+        is_false_person_name,
+        looks_like_environment_or_place_name,
+    )
+
+    assert looks_like_environment_or_place_name(bad_name)
+    assert is_false_person_name(bad_name, context=f"地点：{bad_name}附近")
+
+
+def test_typified_sanitize_rejects_environment_colon_lines():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    raw = (
+        "- 赵疆：地质学教授\n"
+        "- 走廊尽头：撞见两名内务部特工\n"
+        "- 玛依油田：与克拉玛依油城相关的角色"
+    )
+    plot = "赵疆拒绝签字；走廊尽头出现特工"
+    out = sanitize_typified_characters(
+        raw,
+        target=2,
+        locked_names=["赵疆"],
+        seed="赵疆在克拉玛依核验大厅",
+        key_events=plot,
+    )
+    names = _sculptor_names("【人物塑造师】\n" + out)
+    assert len(names) == 2
+    assert "赵疆" in names
+    assert "走廊尽头" not in names
+    assert "玛依油田" not in names
+    assert "本节主要" not in out
+
+
+def test_resolve_verb_glued_functional_names():
+    from narrativeloom.domain.character_names import (
+        _resolve_longest_cast_in_context,
+        complete_sculptor_section,
+    )
+
+    plot = "- 赵铁牛远远举刀，狗剩躲进猪群\n- 韩星结完直播后质问狗剩"
+    out = complete_sculptor_section(
+        "- 狗剩：画师\n- 铁牛远远：与北宋河北路相关\n- 韩星结：与直播相关",
+        plot_sources=[plot],
+        locked_names=["狗剩"],
+        target=2,
+        seed="狗剩在猪圈作画",
+        functional_mode=True,
+    )
+    names = _sculptor_names(out)
+    assert len(names) == 2
+    assert "狗剩" in names
+    assert "铁牛远远" not in names
+    assert "韩星结" not in names
+    assert any(n in ("赵铁牛", "韩星") for n in names)
+
+    assert _resolve_longest_cast_in_context("铁牛远远", plot) == "赵铁牛"
+    assert _resolve_longest_cast_in_context("韩星结", plot) in ("韩星", "韩星结")
+
+
+def test_adaptive_character_target_grows_with_beats():
+    from narrativeloom.domain.character_names import adaptive_character_target
+
+    assert adaptive_character_target(beat_index=0, base=2, locked_count=1, pool="function") == 2
+    assert adaptive_character_target(beat_index=2, base=2, locked_count=2, pool="function") == 3
+    assert adaptive_character_target(beat_index=4, base=2, locked_count=3, pool="genre") == 4
+
+
+def test_parse_user_protagonist_names():
+    from narrativeloom.domain.character_names import parse_user_protagonist_names
+
+    names = parse_user_protagonist_names("达芬奇·狗剩，韩星\n走廊尽头")
+    assert "达芬奇·狗剩" in names
+    assert "韩星" in names
+    assert "走廊尽头" not in names

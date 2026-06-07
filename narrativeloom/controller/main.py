@@ -197,6 +197,9 @@ def _init_state() -> None:
         "bg_phase_done": True,
         "fn_recommended_roles": [],
         "fn_story_char_total": 2,
+        "typ_story_char_total": 2,
+        "story_char_total": 2,
+        "user_protagonist_names": "",
         "fn_locked_setting": "",
         "post_survey_phase": False,
         "likert_u": 3,
@@ -272,9 +275,12 @@ def _assemble_all_beats_text(lg: str, n: int) -> str:
 
 def _locked_character_names(beat_idx: int, lg: str) -> List[str]:
     """前文、背景与创意种子中已登场/既定人物（只增不减）。"""
-    from narrativeloom.domain.character_names import extract_seed_cast_names
+    from narrativeloom.domain.character_names import extract_seed_cast_names, parse_user_protagonist_names
 
     lists: List[List[str]] = []
+    user_prot = parse_user_protagonist_names(st.session_state.get("user_protagonist_names") or "")
+    if user_prot:
+        lists.append(user_prot)
     seed = (st.session_state.get("seed") or "").strip()
     if seed:
         lists.append(extract_seed_cast_names(seed))
@@ -317,18 +323,39 @@ def _fn_plan_labels(lg: str, beat_idx: int) -> List[str]:
     return [T("plan_a", lg), T("plan_b", lg), T("plan_c", lg), T("plan_d", lg)]
 
 
+def _story_char_base() -> int:
+    return int(
+        st.session_state.get("story_char_total")
+        or st.session_state.get("fn_story_char_total")
+        or st.session_state.get("typ_story_char_total")
+        or 2
+    )
+
+
 def _default_character_target(beat_idx: int, lg: str) -> int:
-    """功能化：人数默认稳定，不随小节递增；仅保证前文锁定人物都能出现。"""
+    """功能化：基线人数 + 随小节缓慢扩容，覆盖前文锁定人物。"""
+    from narrativeloom.domain.character_names import adaptive_character_target
+
     locked = _locked_character_names(beat_idx, lg)
-    base = int(st.session_state.get("fn_story_char_total") or 2)
-    return min(14, max(base, len(locked)))
+    return adaptive_character_target(
+        beat_index=beat_idx,
+        base=_story_char_base(),
+        locked_count=len(locked),
+        pool="function",
+    )
 
 
 def _default_typified_character_target(beat_idx: int, lg: str) -> int:
-    """类型化：人数默认稳定；须覆盖种子与前文锁定人物。"""
+    """类型化：基线人数 + 随小节缓慢扩容，覆盖种子与前文锁定人物。"""
+    from narrativeloom.domain.character_names import adaptive_character_target
+
     locked = _locked_character_names(beat_idx, lg)
-    base = int(st.session_state.get("typ_story_char_total") or 2)
-    return min(8, max(base, len(locked), 2))
+    return adaptive_character_target(
+        beat_index=beat_idx,
+        base=_story_char_base(),
+        locked_count=len(locked),
+        pool="genre",
+    )
 
 
 def _prior_summary(idx: int, labels: List[Tuple[str, str]], lg: str) -> str:
@@ -1426,6 +1453,10 @@ def _render_creation_wizard(lg: str) -> None:
         st.session_state.wiz_seed = st.session_state.get("seed", "")
     if "wiz_title" not in st.session_state:
         st.session_state.wiz_title = st.session_state.get("story_title", "")
+    if "wiz_char_total" not in st.session_state:
+        st.session_state.wiz_char_total = int(st.session_state.get("story_char_total") or 2)
+    if "wiz_protagonists" not in st.session_state:
+        st.session_state.wiz_protagonists = st.session_state.get("user_protagonist_names") or ""
     wizard_open(lg)
     c1, c2 = st.columns([1, 1])
     with c1:
@@ -1444,6 +1475,19 @@ def _render_creation_wizard(lg: str) -> None:
             horizontal=True,
             key="wiz_pool",
         )
+    st.select_slider(
+        T("wiz_char_count_label", lg),
+        options=list(range(2, 7)),
+        value=int(st.session_state.get("wiz_char_total", 2)),
+        key="wiz_char_total",
+        help=T("wiz_char_count_hint", lg),
+    )
+    st.text_input(
+        T("wiz_protagonist_label", lg),
+        key="wiz_protagonists",
+        placeholder=T("wiz_protagonist_placeholder", lg),
+        help=T("wiz_protagonist_hint", lg),
+    )
     wt1, wt2 = st.columns([1, 1])
     with wt1:
         st.text_input(
@@ -1468,6 +1512,13 @@ def _render_creation_wizard(lg: str) -> None:
             po = st.session_state.get("wiz_pool", "genre")
             st.session_state.persona_pool = po if po in ("genre", "function") else "genre"
             st.session_state.persona_pool_locked = st.session_state.persona_pool
+            char_total = int(st.session_state.get("wiz_char_total", 2))
+            st.session_state.story_char_total = char_total
+            st.session_state.fn_story_char_total = char_total
+            st.session_state.typ_story_char_total = char_total
+            st.session_state.user_protagonist_names = (
+                st.session_state.get("wiz_protagonists") or ""
+            ).strip()
             st.session_state.creation_explain_on = False
             st.session_state.wizard_done = True
             st.rerun()
