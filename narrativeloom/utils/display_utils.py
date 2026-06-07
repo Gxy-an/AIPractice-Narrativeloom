@@ -470,10 +470,8 @@ def sanitize_typified_characters(
     locked_rows = [(n, d) for n, d in kept if n in locked_set]
     other_rows = [(n, d) for n, d in kept if n not in locked_set]
     merged_rows = locked_rows + other_rows
-    slot = max(target, len(locked_rows))
-    lines = [f"- {n}：{d}" for n, d in merged_rows[:slot]]
-    if len(lines) < target and lines:
-        return "\n".join(lines)
+    display_target = max(target, len(locked_rows))
+    lines = [f"- {n}：{d}" for n, d in merged_rows[:display_target]]
     return "\n".join(lines) if lines else raw
 
 

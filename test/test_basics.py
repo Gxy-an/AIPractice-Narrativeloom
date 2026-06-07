@@ -896,6 +896,29 @@ def test_sanitize_typified_respects_lower_target_on_renorm():
     assert set(names3).issubset(set(names5))
 
 
+def test_sanitize_typified_trims_excess_to_target():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    raw = (
+        "- 达芬奇·狗剩：地质学研究生\n"
+        "- 佩奇：退休向导\n"
+        "- 阿依古丽：巡逻队员\n"
+        "- 老周：油田后裔\n"
+        "- 老马：本地向导"
+    )
+    locked = ["达芬奇·狗剩", "佩奇", "阿依古丽"]
+    seed = "达芬奇·狗剩、佩奇、阿依古丽、老周、老马在克拉玛依"
+    plot = "老周与老马带领众人穿越魔鬼城"
+    out = sanitize_typified_characters(
+        raw,
+        target=3,
+        locked_names=locked,
+        seed=seed,
+        key_events=plot,
+    )
+    assert len(_sculptor_names("【人物塑造师】\n" + out)) == 3
+
+
 def test_filter_valid_cast_names_preserves_preset():
     from narrativeloom.domain.character_names import filter_valid_cast_names
 

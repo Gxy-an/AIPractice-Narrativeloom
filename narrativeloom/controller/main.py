@@ -396,6 +396,57 @@ def _sync_beat_char_target(beat_idx: int, lg: str, pool: str) -> None:
         st.session_state[key] = suggested
 
 
+def _apply_typified_char_target(beat_idx: int, char_target: int) -> int:
+    """写入类型化小节人物目标（独立于 Streamlit 控件键，供生成阶段读取）。"""
+    val = max(2, int(char_target))
+    st.session_state[f"_typ_char_target_{beat_idx}"] = val
+    st.session_state[f"typ_char_total_{beat_idx}"] = val
+    return val
+
+
+def _resolve_typified_char_target(beat_idx: int, lg: str) -> int:
+    """解析当前小节类型化人物目标；重新生成时优先使用用户刚提交的值。"""
+    pending_key = f"_typ_regen_char_target_{beat_idx}"
+    if pending_key in st.session_state:
+        return _apply_typified_char_target(beat_idx, int(st.session_state.pop(pending_key)))
+    for key in (f"_typ_char_target_{beat_idx}", f"typ_char_total_{beat_idx}"):
+        if key in st.session_state:
+            return max(2, int(st.session_state[key]))
+    return max(2, _default_typified_character_target(beat_idx, lg))
+
+
+def _resanitize_typified_candidates(
+    beat_idx: int,
+    lg: str,
+    labels: List[Tuple[str, str]],
+    candidates: List[Tuple[str, Dict[str, Any]]],
+    char_target: int,
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """按目标人数二次规范化各题材候选，确保卡片与存储一致。"""
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    locked = _locked_character_names(beat_idx, lg)
+    target = max(int(char_target), len(locked), 2)
+    prior = _prior_characters_block(beat_idx, labels, lg) if beat_idx > 0 else ""
+    seed = st.session_state.get("seed") or ""
+    out: List[Tuple[str, Dict[str, Any]]] = []
+    for name, data in candidates:
+        item = dict(data)
+        item["characters"] = sanitize_typified_characters(
+            item.get("characters", ""),
+            target=target,
+            locked_names=locked,
+            seed=seed,
+            setting=str(item.get("setting", "")),
+            key_events=str(item.get("key_events", "")),
+            prior_characters_block=prior,
+            strict_narrative_allowlist=False,
+            max_characters=8,
+        )
+        out.append((name, item))
+    return out
+
+
 def _prior_summary(idx: int, labels: List[Tuple[str, str]], lg: str) -> str:
     """按小节顺序拼接已定正文纲要，供后续小节严格承接（线性递进）。"""
     if idx <= 0:
@@ -494,8 +545,16 @@ def _prior_characters_block(
     return "\n\n".join(parts)
 
 
-def _kickoff_beat_generation(idx: int, pool: str) -> None:
+def _kickoff_beat_generation(
+    idx: int,
+    pool: str,
+    *,
+    char_target: Optional[int] = None,
+) -> None:
     """生成阶段一：清空旧 UI 状态并标记 generating，立即 rerun 以只显示 spinner。"""
+    if pool == "genre" and char_target is not None:
+        val = _apply_typified_char_target(idx, char_target)
+        st.session_state[f"_typ_regen_char_target_{idx}"] = val
     _clear_beat_candidate_state()
     _clear_typified_ui_keys(idx)
     st.session_state["_generating_beat_idx"] = idx
@@ -611,20 +670,18 @@ def _parallel_typified(
     lang: str,
     *,
     status: Any = None,
+    char_target: Optional[int] = None,
 ) -> List[Tuple[str, Dict[str, Any]]]:
     seed = st.session_state.seed
     title, hint = labels[beat_idx]
     prior = _prior_summary(beat_idx, labels, lang)
     locked_chars = _locked_character_names(beat_idx, lang)
     prior_chars = _prior_characters_block(beat_idx, labels, lang) if beat_idx > 0 else ""
-    char_target = int(
-        st.session_state.get(
-            f"typ_char_total_{beat_idx}",
-            _default_typified_character_target(beat_idx, lang),
-        )
-    )
-    char_target = max(2, char_target, len(locked_chars))
-    st.session_state[f"_typ_char_target_{beat_idx}"] = char_target
+    if char_target is None:
+        char_target = max(_resolve_typified_char_target(beat_idx, lang), len(locked_chars), 2)
+    else:
+        char_target = max(int(char_target), len(locked_chars), 2)
+    _apply_typified_char_target(beat_idx, char_target)
     personas = get_typified_personas(lang)
     if TYPIFIED_GEN_COUNT > 0:
         personas = personas[:TYPIFIED_GEN_COUNT]
@@ -798,8 +855,21 @@ def _generate_beat_candidates(
 ) -> None:
     """并行生成当前小节候选（类型化或功能化）。"""
     if pool == "genre":
-        st.session_state.typified_candidates = _parallel_typified(
-            idx, llm_cfg, feedback_process, canon, rag, labels, lg, status=status
+        char_target = max(_resolve_typified_char_target(idx, lg), len(_locked_character_names(idx, lg)), 2)
+        _apply_typified_char_target(idx, char_target)
+        raw_candidates = _parallel_typified(
+            idx,
+            llm_cfg,
+            feedback_process,
+            canon,
+            rag,
+            labels,
+            lg,
+            status=status,
+            char_target=char_target,
+        )
+        st.session_state.typified_candidates = _resanitize_typified_candidates(
+            idx, lg, labels, raw_candidates, char_target
         )
         st.session_state["_typ_beat_idx"] = idx
         st.session_state.typified_snapshot = {
@@ -1752,12 +1822,12 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                     live_char_target = int(
                         st.session_state.get(f"typ_char_total_{idx}", char_default)
                     )
-                    st.session_state[f"_typ_char_target_{idx}"] = live_char_target
+                    _apply_typified_char_target(idx, live_char_target)
                     if idx == 0:
                         st.session_state.typ_story_char_total = live_char_target
                     if st.button(T("typ_regen_plans", lg), key=f"typ_regen_{idx}", type="secondary"):
                         st.session_state.typ_story_char_total = live_char_target
-                        _kickoff_beat_generation(idx, "genre")
+                        _kickoff_beat_generation(idx, "genre", char_target=live_char_target)
                     lookup = {nm: d for nm, d in st.session_state.typified_candidates}
                     sel = render_typified_carousel(
                         lg,
