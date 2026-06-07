@@ -829,3 +829,82 @@ def test_functional_sculptor_exact_count_with_locked():
     assert len(names) == 3
     assert "达芬奇·狗剩" in names or "达芬奇" in names
 
+
+def test_rejects_object_like_person_names():
+    from narrativeloom.domain.character_names import is_false_person_name
+
+    assert is_false_person_name("腰挂水囊")
+    assert is_false_person_name("绳索")
+    assert is_false_person_name("水囊")
+    assert not is_false_person_name("阿依古丽")
+
+
+def test_sanitize_typified_rejects_object_fragment_names():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    raw = (
+        "- 达芬奇·狗剩：地质学研究生\n"
+        "- 佩奇：退休向导\n"
+        "- 阿依古丽：巡逻队员\n"
+        "- 腰挂水囊：熟悉当地秘密的向导\n"
+        "- 绳索：熟悉当地秘密的油田后裔"
+    )
+    out = sanitize_typified_characters(
+        raw,
+        target=5,
+        locked_names=["达芬奇·狗剩", "佩奇", "阿依古丽"],
+        seed="达芬奇·狗剩与佩奇在克拉玛依",
+        setting="克拉玛依魔鬼城",
+        key_events="阿依古丽带领众人穿越风蚀地貌",
+    )
+    names = _sculptor_names("【人物塑造师】\n" + out)
+    assert "腰挂水囊" not in names
+    assert "绳索" not in names
+    assert "达芬奇·狗剩" in names
+    assert "佩奇" in names
+    assert "阿依古丽" in names
+
+
+def test_sanitize_typified_respects_lower_target_on_renorm():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    raw = (
+        "- 达芬奇·狗剩：地质学研究生\n"
+        "- 佩奇：退休向导\n"
+        "- 阿依古丽：巡逻队员\n"
+        "- 老周：油田后裔"
+    )
+    locked = ["达芬奇·狗剩", "佩奇", "阿依古丽"]
+    out3 = sanitize_typified_characters(
+        raw,
+        target=3,
+        locked_names=locked,
+        seed="达芬奇·狗剩与佩奇、阿依古丽、老周在克拉玛依",
+        key_events="老周带领众人穿越魔鬼城",
+    )
+    out5 = sanitize_typified_characters(
+        raw,
+        target=5,
+        locked_names=locked,
+        seed="达芬奇·狗剩与佩奇、阿依古丽、老周在克拉玛依",
+        key_events="老周带领众人穿越魔鬼城",
+    )
+    names3 = _sculptor_names("【人物塑造师】\n" + out3)
+    names5 = _sculptor_names("【人物塑造师】\n" + out5)
+    assert len(names3) == 3
+    assert len(names5) == 5
+    assert set(names3).issubset(set(names5))
+
+
+def test_filter_valid_cast_names_preserves_preset():
+    from narrativeloom.domain.character_names import filter_valid_cast_names
+
+    names = filter_valid_cast_names(
+        ["达芬奇·狗剩", "腰挂水囊", "绳索", "佩奇"],
+        preserve=["达芬奇·狗剩", "佩奇"],
+    )
+    assert "达芬奇·狗剩" in names
+    assert "佩奇" in names
+    assert "腰挂水囊" not in names
+    assert "绳索" not in names
+

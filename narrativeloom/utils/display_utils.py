@@ -429,6 +429,8 @@ def sanitize_typified_characters(
 
     for lk in locked:
         if lk and lk not in seen:
+            if is_false_person_name(lk, context=f"{lk}\n{context}"):
+                continue
             _push(lk, raw_map.get(lk, ""))
     for name, desc in raw_map.items():
         _push(name, desc)

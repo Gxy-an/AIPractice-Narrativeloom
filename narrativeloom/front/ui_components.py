@@ -263,9 +263,37 @@ def render_typified_carousel(
     candidates: List[Tuple[str, Dict[str, Any]]],
     *,
     feedback_renderer: Optional[Callable[[str, Any, str], None]] = None,
+    locked_character_names: Optional[List[str]] = None,
+    character_target_total: int = 2,
+    renormalize_on_render: bool = False,
+    seed: str = "",
+    prior_characters_block: str = "",
 ) -> str:
     """横向翻页展示类型化人格候选；卡片内可滚动、等高。"""
-    names = [nm for nm, _ in candidates]
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    display_candidates = candidates
+    if renormalize_on_render:
+        locked = list(locked_character_names or [])
+        target = max(2, int(character_target_total or 2), len(locked))
+        renormed: List[Tuple[str, Dict[str, Any]]] = []
+        for name, data in candidates:
+            item = dict(data)
+            item["characters"] = sanitize_typified_characters(
+                item.get("characters", ""),
+                target=target,
+                locked_names=locked,
+                seed=seed,
+                setting=str(item.get("setting", "")),
+                key_events=str(item.get("key_events", "")),
+                prior_characters_block=prior_characters_block,
+                strict_narrative_allowlist=False,
+                max_characters=8,
+            )
+            renormed.append((name, item))
+        display_candidates = renormed
+
+    names = [nm for nm, _ in display_candidates]
     page_key = f"typ_page_{beat_idx}"
     pick_key = f"typ_picked_{beat_idx}"
     pages = max(1, (len(candidates) + CARDS_PER_PAGE - 1) // CARDS_PER_PAGE)
@@ -308,7 +336,7 @@ def render_typified_carousel(
             st.session_state[page_key] = pi + 1
             st.rerun()
 
-    slice_ = candidates[pi * CARDS_PER_PAGE : (pi + 1) * CARDS_PER_PAGE]
+    slice_ = display_candidates[pi * CARDS_PER_PAGE : (pi + 1) * CARDS_PER_PAGE]
     cols = st.columns(CARDS_PER_PAGE, gap="medium")
     lbl_place = T("brief_time_place", lg)
     lbl_char = T("brief_characters", lg)

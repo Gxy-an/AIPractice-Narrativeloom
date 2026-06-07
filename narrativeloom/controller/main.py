@@ -280,7 +280,11 @@ def _assemble_all_beats_text(lg: str, n: int) -> str:
 
 def _locked_character_names(beat_idx: int, lg: str) -> List[str]:
     """前文、背景与创意种子中已登场/既定人物（只增不减）。"""
-    from narrativeloom.domain.character_names import extract_seed_cast_names, parse_preset_protagonist_names
+    from narrativeloom.domain.character_names import (
+        extract_seed_cast_names,
+        filter_valid_cast_names,
+        parse_preset_protagonist_names,
+    )
 
     lists: List[List[str]] = []
     preset = st.session_state.get("preset_protagonist_names") or []
@@ -306,7 +310,24 @@ def _locked_character_names(beat_idx: int, lg: str) -> List[str]:
                 lists.append(
                     extract_character_names_from_text(merged, sculptor_sections_only=True)
                 )
-    return merge_unique_character_names(*lists)
+    merged = merge_unique_character_names(*lists)
+    ctx = f"{seed}\n{bg}"
+    return filter_valid_cast_names(merged, preserve=list(preset), context=ctx)
+
+
+def _prior_beat_char_target(beat_idx: int, pool: str) -> int:
+    """上一小节确认/使用的人物目标数（后续小节下限参考）。"""
+    if beat_idx <= 0:
+        return 0
+    if pool == "genre":
+        prev_key = f"typ_char_total_{beat_idx - 1}"
+        story_key = "typ_story_char_total"
+    else:
+        prev_key = f"fn_char_total_{beat_idx - 1}"
+        story_key = "fn_story_char_total"
+    if prev_key in st.session_state:
+        return max(2, int(st.session_state[prev_key]))
+    return max(2, int(st.session_state.get(story_key) or 2))
 
 
 def _extract_setting_baseline(outline: str) -> str:
@@ -344,31 +365,34 @@ def _arc_char_growth(beat_idx: int, n_sections: int, base: int, max_cap: int) ->
 
 
 def _default_character_target(beat_idx: int, lg: str) -> int:
-    """功能化：基线来自向导，随小节推进自动上调，且覆盖前文锁定人物。"""
+    """功能化：基线来自向导或上一小节，且覆盖前文锁定人物。"""
     locked = _locked_character_names(beat_idx, lg)
-    base = int(st.session_state.get("fn_story_char_total") or 2)
-    suggested = _arc_char_growth(beat_idx, _n_sections(), base, 14)
-    return min(14, max(suggested, len(locked), 2))
+    if beat_idx <= 0:
+        base = int(st.session_state.get("fn_story_char_total") or 2)
+        return min(14, max(base, len(locked), 2))
+    prev_target = _prior_beat_char_target(beat_idx, "function")
+    return min(14, max(prev_target, len(locked), 2))
 
 
 def _default_typified_character_target(beat_idx: int, lg: str) -> int:
-    """类型化：基线来自向导，随小节推进自动上调，且覆盖种子与前文锁定人物。"""
+    """类型化：基线来自向导或上一小节，且覆盖种子与前文锁定人物。"""
     locked = _locked_character_names(beat_idx, lg)
-    base = int(st.session_state.get("typ_story_char_total") or 2)
-    suggested = _arc_char_growth(beat_idx, _n_sections(), base, 8)
-    return min(8, max(suggested, len(locked), 2))
+    if beat_idx <= 0:
+        base = int(st.session_state.get("typ_story_char_total") or 2)
+        return min(8, max(base, len(locked), 2))
+    prev_target = _prior_beat_char_target(beat_idx, "genre")
+    return min(8, max(prev_target, len(locked), 2))
 
 
 def _sync_beat_char_target(beat_idx: int, lg: str, pool: str) -> None:
-    """进入小节时自动上调目标人数（不覆盖用户手动增大的值）。"""
+    """进入小节时初始化目标人数（不覆盖用户已手动设定的值）。"""
     if pool == "genre":
         suggested = _default_typified_character_target(beat_idx, lg)
         key = f"typ_char_total_{beat_idx}"
     else:
         suggested = _default_character_target(beat_idx, lg)
         key = f"fn_char_total_{beat_idx}"
-    current = int(st.session_state.get(key, suggested))
-    if current < suggested:
+    if key not in st.session_state:
         st.session_state[key] = suggested
 
 
@@ -599,6 +623,8 @@ def _parallel_typified(
             _default_typified_character_target(beat_idx, lang),
         )
     )
+    char_target = max(2, char_target, len(locked_chars))
+    st.session_state[f"_typ_char_target_{beat_idx}"] = char_target
     personas = get_typified_personas(lang)
     if TYPIFIED_GEN_COUNT > 0:
         personas = personas[:TYPIFIED_GEN_COUNT]
@@ -1708,6 +1734,8 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                 elif pool == "genre" and typ_ready:
                     locked_chars = _locked_character_names(idx, lg)
                     char_min = max(2, len(locked_chars))
+                    if idx > 0:
+                        char_min = max(char_min, _prior_beat_char_target(idx, "genre"))
                     char_default = _default_typified_character_target(idx, lg)
                     if f"typ_char_total_{idx}" not in st.session_state:
                         st.session_state[f"typ_char_total_{idx}"] = char_default
@@ -1721,14 +1749,14 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                             names="、".join(locked_chars) if locked_chars else T("fn_char_none", lg)
                         ),
                     )
+                    live_char_target = int(
+                        st.session_state.get(f"typ_char_total_{idx}", char_default)
+                    )
+                    st.session_state[f"_typ_char_target_{idx}"] = live_char_target
                     if idx == 0:
-                        st.session_state.typ_story_char_total = int(
-                            st.session_state.get(f"typ_char_total_{idx}", char_default)
-                        )
+                        st.session_state.typ_story_char_total = live_char_target
                     if st.button(T("typ_regen_plans", lg), key=f"typ_regen_{idx}", type="secondary"):
-                        st.session_state.typ_story_char_total = int(
-                            st.session_state.get(f"typ_char_total_{idx}", char_default)
-                        )
+                        st.session_state.typ_story_char_total = live_char_target
                         _kickoff_beat_generation(idx, "genre")
                     lookup = {nm: d for nm, d in st.session_state.typified_candidates}
                     sel = render_typified_carousel(
@@ -1736,6 +1764,11 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         idx,
                         st.session_state.typified_candidates,
                         feedback_renderer=_render_process_feedback,
+                        locked_character_names=locked_chars,
+                        character_target_total=live_char_target,
+                        renormalize_on_render=True,
+                        seed=st.session_state.get("seed") or "",
+                        prior_characters_block=_prior_characters_block(idx, labels, lg),
                     )
                     dsel = lookup[sel]
                     st.caption(f"{T('current_edit', lg)}: {sel}")
@@ -1787,6 +1820,8 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         lg,
                     )
                     char_min = max(1, len(locked_chars))
+                    if idx > 0:
+                        char_min = max(char_min, _prior_beat_char_target(idx, "function"))
                     char_default = _default_character_target(idx, lg)
                     if f"fn_char_total_{idx}" not in st.session_state:
                         st.session_state[f"fn_char_total_{idx}"] = char_default

@@ -107,6 +107,27 @@ _ENV_VERB_OBJECT = re.compile(
     r"^(?:飘|飞|落|散|堆|铺|挂|洒|冒|浮|卷|吹|扬|混|弥|绕|掠|拂|洒|弥漫|笼罩)"
     r"(?:着|了|起)?[\u4e00-\u9fff]{1,3}$"
 )
+_WEAR_OR_HOLD_OBJECT = re.compile(
+    r"^(?:腰挂|身挂|手持|背着|肩扛|头戴|脚穿|身佩|腰佩|颈挂|腕戴|腰系|身系)"
+    r"[\u4e00-\u9fff]{1,4}$"
+)
+_OBJECT_NOUN_SHORT = frozenset(
+    {
+        "绳索",
+        "水囊",
+        "皮囊",
+        "行囊",
+        "背包",
+        "包袱",
+        "手杖",
+        "拐杖",
+        "腰刀",
+        "腰牌",
+        "水袋",
+        "铁链",
+        "麻绳",
+    }
+)
 _QUANTIFIER_NAME = re.compile(r"^任何[\u4e00-\u9fff]{0,2}$")
 
 _TIME_POINT_WORDS = frozenset(
@@ -167,7 +188,7 @@ _OBJECT_LIKE_NAME = re.compile(
     r")*(?:"
     r"罐|瓶|杯|碗|盘|碟|壶|筒|桶|箱|盒|笼|篮|盆|缸|槽|锅|炉|灶|烟囱|"
     r"桌|椅|凳|床|柜|架|栏|门|窗|墙|砖|瓦|柱|梁|梯|锁|匙|钥|镜|钟|表|"
-    r"伞|扇|绳|线|链|环|针|钉|锤|斧|铲|刀|剪|包|袋|布|毯|席|垫|"
+    r"伞|扇|绳|索|线|链|环|针|钉|锤|斧|铲|刀|剪|包|袋|布|毯|席|垫|囊|"
     r"树|花|草|叶|石|岩|沙|泥|土|水|火|烟|雾|雨|雪|风|云|月|日|星|"
     r"照|片|书|本|页|纸|笔|墨|画|卷|墨|水|"
     r")$"
@@ -233,6 +254,17 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
     if _QUANTIFIER_NAME.match(n):
         return True
     if _ENV_VERB_OBJECT.match(n):
+        return True
+    if _WEAR_OR_HOLD_OBJECT.match(n):
+        return True
+    if n in _OBJECT_NOUN_SHORT:
+        return True
+    if (
+        len(n) <= 5
+        and re.search(r"(?:水囊|皮囊|行囊|绳索|背包|包袱|麻绳|铁链)$", n)
+        and not _is_compound_cast_name(n)
+        and not _is_person(n)
+    ):
         return True
     if re.match(r"^控[\u4e00-\u9fff]?$", n) or n in ("控中", "监控", "监视"):
         return True
@@ -753,6 +785,31 @@ def extract_cast_from_narrative(text: str, *, limit: int = 8) -> List[str]:
             out.append(n)
         if len(out) >= limit:
             break
+    return out
+
+
+def filter_valid_cast_names(
+    names: List[str],
+    *,
+    preserve: Optional[List[str]] = None,
+    context: str = "",
+) -> List[str]:
+    """剔除器物/场景碎片误识别姓名；preserve 中的向导预设名始终保留。"""
+    keep = set(preserve or [])
+    out: List[str] = []
+    seen: Set[str] = set()
+    for raw in names or []:
+        n = (raw or "").strip()
+        if not n or n in seen:
+            continue
+        if n in keep or _is_compound_cast_name(n) or _is_seed_cast_name(n, context=context or n):
+            out.append(n)
+            seen.add(n)
+            continue
+        if is_false_person_name(n, context=f"{n}\n{context}"):
+            continue
+        out.append(n)
+        seen.add(n)
     return out
 
 
