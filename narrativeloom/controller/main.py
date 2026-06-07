@@ -320,11 +320,15 @@ def _prior_beat_char_target(beat_idx: int, pool: str) -> int:
     if beat_idx <= 0:
         return 0
     if pool == "genre":
+        internal_key = f"_typ_char_target_{beat_idx - 1}"
         prev_key = f"typ_char_total_{beat_idx - 1}"
         story_key = "typ_story_char_total"
     else:
+        internal_key = f"_fc_char_target_{beat_idx - 1}"
         prev_key = f"fn_char_total_{beat_idx - 1}"
         story_key = "fn_story_char_total"
+    if internal_key in st.session_state:
+        return max(2, int(st.session_state[internal_key]))
     if prev_key in st.session_state:
         return max(2, int(st.session_state[prev_key]))
     return max(2, int(st.session_state.get(story_key) or 2))
@@ -394,13 +398,14 @@ def _sync_beat_char_target(beat_idx: int, lg: str, pool: str) -> None:
         key = f"fn_char_total_{beat_idx}"
     if key not in st.session_state:
         st.session_state[key] = suggested
+        if pool == "genre":
+            st.session_state[f"_typ_char_target_{beat_idx}"] = suggested
 
 
 def _apply_typified_char_target(beat_idx: int, char_target: int) -> int:
-    """写入类型化小节人物目标（独立于 Streamlit 控件键，供生成阶段读取）。"""
+    """写入类型化小节人物目标（仅用非 widget 键，避免与 number_input 冲突）。"""
     val = max(2, int(char_target))
     st.session_state[f"_typ_char_target_{beat_idx}"] = val
-    st.session_state[f"typ_char_total_{beat_idx}"] = val
     return val
 
 
@@ -554,7 +559,7 @@ def _kickoff_beat_generation(
     """生成阶段一：清空旧 UI 状态并标记 generating，立即 rerun 以只显示 spinner。"""
     if pool == "genre" and char_target is not None:
         val = _apply_typified_char_target(idx, char_target)
-        st.session_state[f"_typ_regen_char_target_{idx}"] = val
+        st.session_state[f"_typ_regen_char_target_{idx}"] = val  # 生成阶段读取，勿写 widget 键
     _clear_beat_candidate_state()
     _clear_typified_ui_keys(idx)
     st.session_state["_generating_beat_idx"] = idx
@@ -1822,7 +1827,7 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                     live_char_target = int(
                         st.session_state.get(f"typ_char_total_{idx}", char_default)
                     )
-                    _apply_typified_char_target(idx, live_char_target)
+                    st.session_state[f"_typ_char_target_{idx}"] = live_char_target
                     if idx == 0:
                         st.session_state.typ_story_char_total = live_char_target
                     if st.button(T("typ_regen_plans", lg), key=f"typ_regen_{idx}", type="secondary"):
