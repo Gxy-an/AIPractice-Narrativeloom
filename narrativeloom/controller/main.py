@@ -610,7 +610,14 @@ def _parallel_typified(
     for name, _ in get_typified_personas(lang)[: len(personas)]:
         data = results_map.get(name) or {"setting": "", "characters": "", "key_events": ""}
         results.append((name, data))
-    return results
+    from narrativeloom.utils.display_utils import diversify_typified_parallel_characters
+
+    return diversify_typified_parallel_characters(
+        results,
+        locked_names=locked_chars,
+        seed=seed,
+        character_target=char_target,
+    )
 
 
 def _generate_unified_functional(

@@ -316,6 +316,8 @@ def _is_narrative_cast_candidate(name: str, *, context: str = "") -> bool:
         return False
     if re.search(r"(的$|地$|得$|着$|了$|过$|在$|把$|被$|与$|和$|及$|或$)", n):
         return False
+    if re.search(r"(陌生人|人影|身影|老者|少年|女子|男子|掌柜|店主)$", n):
+        return True
     return bool(re.fullmatch(r"[\u4e00-\u9fff]{2,4}", n))
 
 
@@ -974,42 +976,40 @@ def _fallback_supplementary_names(
     seed: str,
     narrative: str = "",
     limit: int = 12,
-    plan_index: int = 0,  # 新参数：计划索引，用于名字多样性
+    plan_index: int = 0,
+    avoid_names: Optional[List[str]] = None,
 ) -> List[str]:
-    """从剧情/设定叙事中提取可用于补位的真实姓名（按优先级排序）。
-    
-    使用 plan_index 进行随机播放以实现计划间的名字多样性。
-    """
+    """从剧情/设定叙事中提取可用于补位的真实姓名（按优先级排序）。"""
     import random
-    from collections import defaultdict
-    
+
     plot_blob = "\n".join(x for x in (seed, narrative, full) if (x or "").strip())
+    events_blob = "\n".join(x for x in (seed, narrative) if (x or "").strip())
+    avoid = {
+        (n or "").strip()
+        for n in (avoid_names or [])
+        if (n or "").strip()
+    }
     ranked = [
         n
         for n in extract_cast_from_narrative(plot_blob, limit=16)
         if _is_narrative_cast_candidate(n, context=plot_blob)
     ]
-    
-    # 按长度分组，然后在每个长度组内根据 plan_index 进行随机排列
-    by_length = defaultdict(list)
-    for i, n in enumerate(ranked):
-        by_length[len(n)].append((i, n))
-    
-    # 按长度降序处理（优先选择较长的名字）
-    result_with_index = []
-    for length in sorted(by_length.keys(), reverse=True):
-        group = by_length[length]
-        # 在相同长度组内使用 plan_index 进行确定性随机排列
-        rng = random.Random(hash((seed, length, plan_index)))
-        rng.shuffle(group)
-        result_with_index.extend(group)
-    
+    in_events = sorted(
+        [n for n in ranked if n in events_blob],
+        key=lambda n: (-_mentions(events_blob, n), -len(n), ranked.index(n) if n in ranked else 99),
+    )
+    extras = [n for n in ranked if n not in in_events]
+    rng = random.Random(hash((seed, plan_index, len(existing))))
+    rng.shuffle(extras)
+    ordered = in_events + extras
     out: List[str] = []
-    for _, n in result_with_index:
+    for n in ordered:
+        if n in avoid:
+            continue
         if _is_subname_of_compound_cast(n, existing + out):
             continue
         clean = _scrub_cast_name(n, existing + out, context=plot_blob)
-        if clean and clean not in existing and clean not in out:
+        if clean and clean not in existing and clean not in out and clean not in avoid:
             out.append(clean)
         if len(out) >= limit:
             break

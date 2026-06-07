@@ -1073,10 +1073,30 @@ def generate_typified_beat(
         setting=str(data.get("setting", "")),
         key_events=str(data.get("key_events", "")),
         prior_characters_block=prior_characters_block,
+        plan_index=abs(hash(genre_name)) % 997,
     )
     if not typified_characters_meaningful(data.get("characters")) and (data.get("setting") or "").strip():
         data["characters"] = "- （待补全人物）"
     return data
+
+
+def _extract_sculptor_names_from_outline(outline: str, *, locked: Optional[List[str]] = None) -> List[str]:
+    """从总体方案中提取人物塑造师姓名（不含锁定/种子主角）。"""
+    from narrativeloom.utils.display_utils import parse_merge_role_sections, _is_sculptor_section_title
+
+    locked_set = set(locked or [])
+    names: List[str] = []
+    for title, body in parse_merge_role_sections(outline):
+        if not _is_sculptor_section_title(title):
+            continue
+        for ln in (body or "").splitlines():
+            probe = ln.strip().lstrip("-·• ")
+            if "：" not in probe:
+                continue
+            name = probe.split("：", 1)[0].strip()
+            if name and name not in locked_set and name not in names:
+                names.append(name)
+    return names
 
 
 UNIFIED_FN_PLAN_COUNT = 4
@@ -1086,13 +1106,14 @@ _MUT_OPEN = "⟦mut⟧"
 _MUT_CLOSE = "⟦/mut⟧"
 
 
-def _normalize_unified_plan_item(item: Any) -> tuple[str, Any]:
+def _normalize_unified_plan_item(item: Any) -> tuple[str, str, Any]:
     if isinstance(item, dict):
         txt = str(
             item.get("outline") or item.get("merged") or item.get("fragment") or item.get("text") or ""
         ).strip()
-        return txt, item.get("process_feedback")
-    return str(item or "").strip(), None
+        cast = str(item.get("cast") or item.get("characters") or "").strip()
+        return txt, cast, item.get("process_feedback")
+    return str(item or "").strip(), "", None
 
 
 def _coerce_unified_plan_variants(
@@ -1113,14 +1134,20 @@ def _coerce_unified_plan_variants(
         extract_seed_cast_names(seed),
     )
     sculpt_target = character_target_total if character_target_total is not None else max(2, len(locked))
+    from narrativeloom.utils.display_utils import merge_functional_cast_into_outline
+
+    used_cast_names: List[str] = []
     expanded: List[Dict[str, Any]] = []
     for item in variants:
-        txt, pf = _normalize_unified_plan_item(item)
-        if not (txt or "").strip():
+        txt, cast, pf = _normalize_unified_plan_item(item)
+        if not (txt or "").strip() and not (cast or "").strip():
             expanded.append({"outline": "", "process_feedback": pf if feedback_process else None})
             continue
+        if (cast or "").strip():
+            txt = merge_functional_cast_into_outline(
+                cast, txt, role_names=role_names, lang=lang
+            )
         for piece in split_concatenated_unified_plans(txt, role_names, max_plans=plan_count):
-            # 传递计划索引以支持计划特定的名字多样性
             plan_index = len(expanded)
             normalized = normalize_single_unified_outline(
                 piece,
@@ -1131,9 +1158,13 @@ def _coerce_unified_plan_variants(
                 beat_index=beat_index,
                 seed=seed,
                 prior_character_profiles=prior_character_profiles,
-                plan_index=plan_index,  # 新参数：计划索引
+                plan_index=plan_index,
+                avoid_character_names=used_cast_names,
             )
             expanded.append({"outline": normalized, "process_feedback": pf if feedback_process else None})
+            for n in _extract_sculptor_names_from_outline(normalized, locked=locked):
+                if n not in used_cast_names:
+                    used_cast_names.append(n)
             if len(expanded) >= plan_count:
                 break
         if len(expanded) >= plan_count:
@@ -1154,7 +1185,7 @@ def _coerce_antitrope_variants(
 
     expanded: List[Dict[str, Any]] = []
     for item in variants:
-        txt, pf = _normalize_unified_plan_item(item)
+        txt, _cast, pf = _normalize_unified_plan_item(item)
         txt = repair_antitrope_outline(strip_trailing_json_leak(unescape_display_text(txt))).strip()
         if txt:
             txt = normalize_mutation_marker_aliases(txt).strip()
@@ -1406,8 +1437,12 @@ def generate_unified_functional_plans(
         system = (
             f"你是叙事统筹，协调下列职能一次产出完整小节拼合稿。只输出 JSON。"
             f'必须返回 {{"variants":[...]}}，恰好 {plan_count} 个对象。'
+            f"每个 variant 须为独立对象，含 cast 与 outline 两键。"
+            f"cast：先完成人物构思，恰好 {sculpt_target} 行，每行「- 姓名：身份/性格/关系」（禁止占位句）；"
+            "四案新增配角姓名不得重复（种子锁定人物除外），各案配角身份描述须各不相同。"
+            f"outline：仅含除人物塑造师外的其它职能分块（可省略【人物塑造师】，系统会注入 cast）；"
             f"每个 variants 数组元素是独立对象，禁止把 {plan_count} 个方案拼进同一个 outline 字符串。"
-            f'每个 variant.outline 仅含一套 {headers} 分块（各职能标题各出现一次），'
+            f'每个 variant.outline 仅含一套职能分块（人物塑造师由 cast 提供），'
             "分块内每行以「- 」开头（JSON 字符串内用真实换行，禁止输出字面量 \\n）；各职能内容互相呼应、不得矛盾。"
             f"{setting_fmt}"
             f"{_UNIFIED_FN_TONE_ZH}"
