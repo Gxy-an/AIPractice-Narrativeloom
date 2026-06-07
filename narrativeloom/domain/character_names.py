@@ -995,15 +995,13 @@ def _fallback_supplementary_names(
     for i, n in enumerate(ranked):
         by_length[len(n)].append((i, n))
     
-    # 按长度降序处理（优先选择较长的名字）；plan_index=0 保持提取顺序，>0 时在组内打散以增加方案间差异
+    # 按长度降序处理（优先选择较长的名字）
     result_with_index = []
     for length in sorted(by_length.keys(), reverse=True):
         group = by_length[length]
-        if plan_index > 0:
-            rng = random.Random(hash((seed, length, plan_index)))
-            rng.shuffle(group)
-        else:
-            group = sorted(group, key=lambda item: item[0])
+        # 在相同长度组内使用 plan_index 进行确定性随机排列
+        rng = random.Random(hash((seed, length, plan_index)))
+        rng.shuffle(group)
         result_with_index.extend(group)
     
     out: List[str] = []

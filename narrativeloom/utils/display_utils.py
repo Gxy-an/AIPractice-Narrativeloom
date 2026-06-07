@@ -1497,24 +1497,30 @@ def _strip_glued_verb_from_name(name: str) -> str:
                 continue
         break
     
-    # 第二层：仅当末尾字像动词粘连时继续剥离（避免把「黑袍陌生人」截成「黑袍」）
+    # 第二层：启发式剥离（处理集合外的粘连字符）
+    # 如果名字仍然长于4字，说明可能有多个粘连字符或集合不完整
     if len(n) > 4:
-        original = n
-        while len(n) > 4 and n[-1] in (_SCULPTOR_GLUED_VERB | _SINGLE_CHAR_VERB_TAIL):
+        # 尝试从末尾逐个移除字符，直到得到有效的人名或受保护的复合名
+        while len(n) > 2:
             candidate = n[:-1]
+            # 检查候选名字是否有效
             if _is_protected_compound_name(candidate):
+                # 如果是受保护的复合名，直接返回
                 n = candidate
                 break
-            if (
-                2 <= len(candidate) <= 4
-                and _STRICT_PERSON_NAME.fullmatch(candidate)
+            elif (
+                2 <= len(candidate) <= 4  # 有效中文人名通常是2-4字
+                and _STRICT_PERSON_NAME.fullmatch(candidate) 
                 and _looks_like_person_name(candidate)
             ):
                 n = candidate
                 break
-            n = candidate
+            else:
+                # 继续尝试剥离
+                n = candidate
+        # 如果最后n的长度<2，恢复原始名字
         if len(n) < 2:
-            n = original
+            n = (name or "").strip()
     
     return _trim_scene_glued_suffix_from_name(n)
 
