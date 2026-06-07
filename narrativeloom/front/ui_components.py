@@ -705,6 +705,7 @@ def render_unified_plan_carousel(
     mutation_baseline: str = "",
     seed: str = "",
     beat_index: int = 0,
+    prior_character_profiles: Optional[Dict[str, str]] = None,
 ) -> int:
     """功能化/反套路总体方案：横向翻页展示候选。"""
     from narrativeloom.utils.display_utils import normalize_single_unified_outline, outline_to_display_html
@@ -782,6 +783,7 @@ def render_unified_plan_carousel(
                     character_target_total=character_target_total,
                     seed=seed,
                     beat_index=beat_index,
+                    prior_character_profiles=prior_character_profiles,
                 )
             picked_cls = " is-picked" if vi == picked else ""
             body_html = outline_to_display_html(

@@ -672,131 +672,125 @@ def test_sanitize_fills_exact_target_from_multiple_seeds(seed_plot_pair):
         assert name in names
 
 
-def test_handle_glued_verb_multi_char_names():
-    """测试处理粘连字符的多字人物名（如"阿依古都"->应该是"阿依古丽"或类似有效名字）"""
+@pytest.mark.parametrize(
+    "bad_name",
+    ["控中", "任何以", "任何召", "飘着麦秸", "时被翠花"],
+)
+def test_functional_rejects_scene_and_rule_fragments(bad_name):
+    from narrativeloom.domain.character_names import complete_sculptor_section, is_false_person_name
+
+    assert is_false_person_name(bad_name, context=bad_name)
+    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》，模特是十二头猪"
+    plot = "- 露辛达从蘑菇中现身警告狗剩；张晓红在监控中记录实验数据"
+    out = complete_sculptor_section(
+        f"- {bad_name}：本节主要人物，身处2147年火星殖民地生物实验舱",
+        plot_sources=[plot],
+        locked_names=["达芬奇·狗剩"],
+        target=2,
+        seed=seed,
+        functional_mode=True,
+    )
+    assert bad_name not in out
+    assert "达芬奇·狗剩" in out
+
+
+def test_functional_fills_plot_character_missing_from_sculptor():
     from narrativeloom.service.llm_client import _coerce_unified_plan_variants
 
-    # 模拟模型输出多字粘连的情况
-    seed = "阿依古丽在天山驿站，艾买提在附近。"
-    locked = ["阿依古丽", "艾买提"]
+    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》，模特是十二头猪"
     raw = """【设定构建师】
-- 地点：天山驿站
-- 时间：贞观年间
+- 地点：2147年火星殖民地生物实验舱
 【人物塑造师】
-- 阿依古都：掌柜之女
-- 艾买提起：驿站掌管人
-- 韩星藏：其他旅客
+- 达芬奇·狗剩：外星生物学家
+- 控中：本节主要人物，身处实验舱
 【剧情逻辑师】
-- 故事发生在驿站
+- 张晓红在监控中质疑狗剩的脑波同步实验
+- 陈星通试图中止违规操作
 【冲突设计师】
-- 核心矛盾待定"""
-    
+- 核心矛盾：科研伦理与艺术执念"""
     out = _coerce_unified_plan_variants(
         [{"outline": raw}],
         plan_count=1,
         feedback_process=False,
-        locked_character_names=locked,
-        character_target_total=3,
+        locked_character_names=["达芬奇·狗剩"],
+        character_target_total=2,
         role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
         seed=seed,
     )[0]["outline"]
-    
     names = _sculptor_names(out)
-    # 验证多字粘连被正确剥离
-    assert "阿依古都" not in names
-    assert "艾买提起" not in names
-    assert "韩星藏" not in names
-    # 验证清理后的名字是合法的中文人名
-    for name in names:
-        # 中文名应该是2-4个字
-        assert 2 <= len(name) <= 4, f"Name '{name}' has invalid length"
-        # 不应该包含某些常见的错误粘连字
-        assert not any(c in name for c in "都起藏"), f"Name '{name}' contains glued chars"
+    assert len(names) == 2
+    assert "达芬奇·狗剩" in names
+    assert "控中" not in names
+    assert "张晓红" in names or "陈星通" in names
 
 
-@pytest.mark.parametrize(
-    "bad_name",
-    [
-        "走廊尽头",
-        "走廊深处",
-        "玛依油田",
-        "导师宿舍",
-        "苏联",
-        "核验大厅",
-    ],
-)
-def test_rejects_environment_and_place_as_person_names(bad_name):
-    from narrativeloom.domain.character_names import (
-        is_false_person_name,
-        looks_like_environment_or_place_name,
-    )
+def test_parse_preset_protagonist_names():
+    from narrativeloom.domain.character_names import parse_preset_protagonist_names
 
-    assert looks_like_environment_or_place_name(bad_name)
-    assert is_false_person_name(bad_name, context=f"地点：{bad_name}附近")
+    assert parse_preset_protagonist_names("达芬奇·狗剩、翠花、韩星") == [
+        "达芬奇·狗剩",
+        "翠花",
+        "韩星",
+    ]
+    assert parse_preset_protagonist_names("飘着麦秸") == []
 
 
-def test_typified_sanitize_rejects_environment_colon_lines():
+def test_sanitize_preserves_wizard_preset_protagonist():
     from narrativeloom.utils.display_utils import sanitize_typified_characters
 
-    raw = (
-        "- 赵疆：地质学教授\n"
-        "- 走廊尽头：撞见两名内务部特工\n"
-        "- 玛依油田：与克拉玛依油城相关的角色"
-    )
-    plot = "赵疆拒绝签字；走廊尽头出现特工"
     out = sanitize_typified_characters(
+        "- 阿依古丽·买买提：油城女儿\n- 艾力·哈森：工程师",
+        target=2,
+        locked_names=["达芬奇"],
+        seed="我的导师来自新疆克拉玛依",
+        max_characters=8,
+    )
+    assert "达芬奇" in out
+
+
+def test_functional_preserves_wizard_preset_protagonist():
+    from narrativeloom.utils.display_utils import normalize_single_unified_outline
+
+    seed = "我的导师来自新疆克拉玛依"
+    locked = ["达芬奇"]
+    raw = """【设定构建师】
+- 地点：克拉玛依老炼油厂
+- 时间：1980年代末
+【人物塑造师】
+- 阿依古丽·买买提：油城女儿
+- 艾力·哈森：工程师
+【剧情逻辑师】
+- 阿依古丽在车间整理设备，艾力前来协助
+【冲突设计师】
+- 核心矛盾：理想与现实"""
+    out = normalize_single_unified_outline(
         raw,
-        target=2,
-        locked_names=["赵疆"],
-        seed="赵疆在克拉玛依核验大厅",
-        key_events=plot,
-    )
-    names = _sculptor_names("【人物塑造师】\n" + out)
-    assert len(names) == 2
-    assert "赵疆" in names
-    assert "走廊尽头" not in names
-    assert "玛依油田" not in names
-    assert "本节主要" not in out
-
-
-def test_resolve_verb_glued_functional_names():
-    from narrativeloom.domain.character_names import (
-        _resolve_longest_cast_in_context,
-        complete_sculptor_section,
-    )
-
-    plot = "- 赵铁牛远远举刀，狗剩躲进猪群\n- 韩星结完直播后质问狗剩"
-    out = complete_sculptor_section(
-        "- 狗剩：画师\n- 铁牛远远：与北宋河北路相关\n- 韩星结：与直播相关",
-        plot_sources=[plot],
-        locked_names=["狗剩"],
-        target=2,
-        seed="狗剩在猪圈作画",
-        functional_mode=True,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
+        locked_names=locked,
+        character_target_total=2,
+        seed=seed,
+        prior_character_profiles={"达芬奇": "向导既定主角"},
     )
     names = _sculptor_names(out)
     assert len(names) == 2
-    assert "狗剩" in names
-    assert "铁牛远远" not in names
-    assert "韩星结" not in names
-    assert any(n in ("赵铁牛", "韩星") for n in names)
-
-    assert _resolve_longest_cast_in_context("铁牛远远", plot) == "赵铁牛"
-    assert _resolve_longest_cast_in_context("韩星结", plot) in ("韩星", "韩星结")
+    assert "达芬奇" in names
+    assert "控中" not in out
+    assert "任何以" not in out
 
 
-def test_adaptive_character_target_grows_with_beats():
-    from narrativeloom.domain.character_names import adaptive_character_target
+def test_functional_sculptor_exact_count_with_locked():
+    from narrativeloom.domain.character_names import complete_sculptor_section
 
-    assert adaptive_character_target(beat_index=0, base=2, locked_count=1, pool="function") == 2
-    assert adaptive_character_target(beat_index=2, base=2, locked_count=2, pool="function") == 3
-    assert adaptive_character_target(beat_index=4, base=2, locked_count=3, pool="genre") == 4
+    seed = "达芬奇·狗剩在猪圈墙上画《最后的晚餐》"
+    plot = "- 朱塞佩看见狗剩在猪圈画壁画，老周在一旁看守"
+    out = complete_sculptor_section(
+        "- 交换：无效\n- 老僧的警：无效",
+        plot_sources=[plot],
+        locked_names=["达芬奇·狗剩", "达芬奇"],
+        target=3,
+        seed=seed,
+    )
+    names = _sculptor_names("【人物塑造师】\n" + out)
+    assert len(names) == 3
+    assert "达芬奇·狗剩" in names or "达芬奇" in names
 
-
-def test_parse_user_protagonist_names():
-    from narrativeloom.domain.character_names import parse_user_protagonist_names
-
-    names = parse_user_protagonist_names("达芬奇·狗剩，韩星\n走廊尽头")
-    assert "达芬奇·狗剩" in names
-    assert "韩星" in names
-    assert "走廊尽头" not in names

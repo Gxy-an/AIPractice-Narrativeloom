@@ -120,6 +120,9 @@ def _body_canon_prefix() -> str:
     parts: List[str] = []
     s = (st.session_state.get("background_setting") or "").strip()
     c = (st.session_state.get("background_characters") or "").strip()
+    preset = st.session_state.get("preset_protagonist_names") or []
+    if preset:
+        parts.append("【既定主角姓名（各小节须出现）】\n" + "、".join(str(n) for n in preset if n))
     if s:
         parts.append("【世界设定纲要】\n" + s)
     if c:
@@ -144,6 +147,9 @@ def _reset_new_story() -> None:
     st.session_state.expanded_prose = ""
     st.session_state.background_setting = ""
     st.session_state.background_characters = ""
+    st.session_state.preset_protagonist_names = []
+    st.session_state.fn_story_char_total = 2
+    st.session_state.typ_story_char_total = 2
     st.session_state.bg_phase_done = True
     st.session_state.fn_recommended_roles = []
     st.session_state.pop("fn_rec_sig", None)
@@ -198,8 +204,7 @@ def _init_state() -> None:
         "fn_recommended_roles": [],
         "fn_story_char_total": 2,
         "typ_story_char_total": 2,
-        "story_char_total": 2,
-        "user_protagonist_names": "",
+        "preset_protagonist_names": [],
         "fn_locked_setting": "",
         "post_survey_phase": False,
         "likert_u": 3,
@@ -275,12 +280,12 @@ def _assemble_all_beats_text(lg: str, n: int) -> str:
 
 def _locked_character_names(beat_idx: int, lg: str) -> List[str]:
     """前文、背景与创意种子中已登场/既定人物（只增不减）。"""
-    from narrativeloom.domain.character_names import extract_seed_cast_names, parse_user_protagonist_names
+    from narrativeloom.domain.character_names import extract_seed_cast_names, parse_preset_protagonist_names
 
     lists: List[List[str]] = []
-    user_prot = parse_user_protagonist_names(st.session_state.get("user_protagonist_names") or "")
-    if user_prot:
-        lists.append(user_prot)
+    preset = st.session_state.get("preset_protagonist_names") or []
+    if preset:
+        lists.append(list(preset))
     seed = (st.session_state.get("seed") or "").strip()
     if seed:
         lists.append(extract_seed_cast_names(seed))
@@ -323,39 +328,48 @@ def _fn_plan_labels(lg: str, beat_idx: int) -> List[str]:
     return [T("plan_a", lg), T("plan_b", lg), T("plan_c", lg), T("plan_d", lg)]
 
 
-def _story_char_base() -> int:
-    return int(
-        st.session_state.get("story_char_total")
-        or st.session_state.get("fn_story_char_total")
-        or st.session_state.get("typ_story_char_total")
-        or 2
-    )
+def _arc_char_growth(beat_idx: int, n_sections: int, base: int, max_cap: int) -> int:
+    """随叙事推进略增可用人头（开端=基线，发展+1，高潮+2）。"""
+    n = max(2, int(n_sections))
+    if beat_idx <= 0:
+        return min(max_cap, max(2, base))
+    ratio = beat_idx / max(1, n - 1)
+    if ratio < 0.34:
+        growth = 0
+    elif ratio < 0.67:
+        growth = 1
+    else:
+        growth = 2
+    return min(max_cap, max(2, base + growth))
 
 
 def _default_character_target(beat_idx: int, lg: str) -> int:
-    """功能化：基线人数 + 随小节缓慢扩容，覆盖前文锁定人物。"""
-    from narrativeloom.domain.character_names import adaptive_character_target
-
+    """功能化：基线来自向导，随小节推进自动上调，且覆盖前文锁定人物。"""
     locked = _locked_character_names(beat_idx, lg)
-    return adaptive_character_target(
-        beat_index=beat_idx,
-        base=_story_char_base(),
-        locked_count=len(locked),
-        pool="function",
-    )
+    base = int(st.session_state.get("fn_story_char_total") or 2)
+    suggested = _arc_char_growth(beat_idx, _n_sections(), base, 14)
+    return min(14, max(suggested, len(locked), 2))
 
 
 def _default_typified_character_target(beat_idx: int, lg: str) -> int:
-    """类型化：基线人数 + 随小节缓慢扩容，覆盖种子与前文锁定人物。"""
-    from narrativeloom.domain.character_names import adaptive_character_target
-
+    """类型化：基线来自向导，随小节推进自动上调，且覆盖种子与前文锁定人物。"""
     locked = _locked_character_names(beat_idx, lg)
-    return adaptive_character_target(
-        beat_index=beat_idx,
-        base=_story_char_base(),
-        locked_count=len(locked),
-        pool="genre",
-    )
+    base = int(st.session_state.get("typ_story_char_total") or 2)
+    suggested = _arc_char_growth(beat_idx, _n_sections(), base, 8)
+    return min(8, max(suggested, len(locked), 2))
+
+
+def _sync_beat_char_target(beat_idx: int, lg: str, pool: str) -> None:
+    """进入小节时自动上调目标人数（不覆盖用户手动增大的值）。"""
+    if pool == "genre":
+        suggested = _default_typified_character_target(beat_idx, lg)
+        key = f"typ_char_total_{beat_idx}"
+    else:
+        suggested = _default_character_target(beat_idx, lg)
+        key = f"fn_char_total_{beat_idx}"
+    current = int(st.session_state.get(key, suggested))
+    if current < suggested:
+        st.session_state[key] = suggested
 
 
 def _prior_summary(idx: int, labels: List[Tuple[str, str]], lg: str) -> str:
@@ -423,10 +437,15 @@ def _clear_typified_ui_keys(beat_idx: int) -> None:
 def _prior_characters_block(
     beat_idx: int, labels: List[Tuple[str, str]], lg: str
 ) -> str:
-    """汇总背景与前序小节已定人物，供各题材/职能在本节更新（非重置）。"""
+    """汇总背景、向导预设与前序小节已定人物，供各题材/职能在本节更新（非重置）。"""
     from narrativeloom.utils.display_utils import extract_sculptor_section_text
 
     parts: List[str] = []
+    preset = st.session_state.get("preset_protagonist_names") or []
+    if preset:
+        preset_lines = "\n".join(f"- {n}：向导既定主角" for n in preset if n)
+        if preset_lines:
+            parts.append(f"【向导既定主角（各小节须出现）】\n{preset_lines}")
     bg = (st.session_state.get("background_characters") or "").strip()
     if bg:
         parts.append(f"【背景人物档案】\n{bg[:2000]}")
@@ -637,14 +656,7 @@ def _parallel_typified(
     for name, _ in get_typified_personas(lang)[: len(personas)]:
         data = results_map.get(name) or {"setting": "", "characters": "", "key_events": ""}
         results.append((name, data))
-    from narrativeloom.utils.display_utils import diversify_typified_parallel_characters
-
-    return diversify_typified_parallel_characters(
-        results,
-        locked_names=locked_chars,
-        seed=seed,
-        character_target=char_target,
-    )
+    return results
 
 
 def _generate_unified_functional(
@@ -663,7 +675,7 @@ def _generate_unified_functional(
     char_target = int(
         st.session_state.get(f"fn_char_total_{beat_idx}", _default_character_target(beat_idx, lang))
     )
-    char_target = max(char_target, len(locked_chars), 1)
+    char_target = max(2, char_target, len(locked_chars))
     st.session_state[f"_fc_char_target_{beat_idx}"] = char_target
     prior_texts = [_beat_to_text(st.session_state.beats[i], lang) for i in range(beat_idx)]
     digest = prior_beats_repetition_digest(prior_texts)
@@ -1258,6 +1270,11 @@ def _drafts_panel() -> None:
                 st.session_state.current_beat = int(d.get("current_beat", 0))
                 st.session_state.background_setting = d.get("background_setting", "")
                 st.session_state.background_characters = d.get("background_characters", "")
+                preset = d.get("preset_protagonist_names")
+                if isinstance(preset, list):
+                    st.session_state.preset_protagonist_names = [str(n) for n in preset if n]
+                else:
+                    st.session_state.preset_protagonist_names = []
                 st.session_state.bg_phase_done = bool(d.get("bg_phase_done", False))
                 wo = d.get("bg_world_options")
                 if isinstance(wo, list):
@@ -1454,9 +1471,14 @@ def _render_creation_wizard(lg: str) -> None:
     if "wiz_title" not in st.session_state:
         st.session_state.wiz_title = st.session_state.get("story_title", "")
     if "wiz_char_total" not in st.session_state:
-        st.session_state.wiz_char_total = int(st.session_state.get("story_char_total") or 2)
+        st.session_state.wiz_char_total = int(
+            st.session_state.get("fn_story_char_total")
+            or st.session_state.get("typ_story_char_total")
+            or 2
+        )
     if "wiz_protagonists" not in st.session_state:
-        st.session_state.wiz_protagonists = st.session_state.get("user_protagonist_names") or ""
+        preset = st.session_state.get("preset_protagonist_names") or []
+        st.session_state.wiz_protagonists = "、".join(preset) if preset else ""
     wizard_open(lg)
     c1, c2 = st.columns([1, 1])
     with c1:
@@ -1475,19 +1497,22 @@ def _render_creation_wizard(lg: str) -> None:
             horizontal=True,
             key="wiz_pool",
         )
-    st.select_slider(
-        T("wiz_char_count_label", lg),
-        options=list(range(2, 7)),
-        value=int(st.session_state.get("wiz_char_total", 2)),
-        key="wiz_char_total",
-        help=T("wiz_char_count_hint", lg),
-    )
-    st.text_input(
-        T("wiz_protagonist_label", lg),
-        key="wiz_protagonists",
-        placeholder=T("wiz_protagonist_placeholder", lg),
-        help=T("wiz_protagonist_hint", lg),
-    )
+    wc1, wc2 = st.columns([1, 1])
+    with wc1:
+        st.select_slider(
+            T("wiz_char_total_label", lg),
+            options=list(range(2, 9)),
+            value=int(st.session_state.get("wiz_char_total", 2)),
+            key="wiz_char_total",
+            help=T("wiz_char_total_help", lg),
+        )
+    with wc2:
+        st.text_input(
+            T("wiz_protagonists_label", lg),
+            key="wiz_protagonists",
+            placeholder=T("wiz_protagonists_ph", lg),
+            help=T("wiz_protagonists_help", lg),
+        )
     wt1, wt2 = st.columns([1, 1])
     with wt1:
         st.text_input(
@@ -1512,13 +1537,14 @@ def _render_creation_wizard(lg: str) -> None:
             po = st.session_state.get("wiz_pool", "genre")
             st.session_state.persona_pool = po if po in ("genre", "function") else "genre"
             st.session_state.persona_pool_locked = st.session_state.persona_pool
-            char_total = int(st.session_state.get("wiz_char_total", 2))
-            st.session_state.story_char_total = char_total
-            st.session_state.fn_story_char_total = char_total
-            st.session_state.typ_story_char_total = char_total
-            st.session_state.user_protagonist_names = (
+            char_base = int(st.session_state.get("wiz_char_total", 2))
+            st.session_state.fn_story_char_total = char_base
+            st.session_state.typ_story_char_total = char_base
+            from narrativeloom.domain.character_names import parse_preset_protagonist_names
+
+            st.session_state.preset_protagonist_names = parse_preset_protagonist_names(
                 st.session_state.get("wiz_protagonists") or ""
-            ).strip()
+            )
             st.session_state.creation_explain_on = False
             st.session_state.wizard_done = True
             st.rerun()
@@ -1619,6 +1645,7 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
         pane = st.container()
 
     with pane:
+        _sync_beat_char_target(idx, lg, pool)
         if not config_locked:
             st.session_state.seed = st.text_area(
                 T("sparkles", lg), value=st.session_state.seed, height=64, key="ws_seed"
@@ -1773,6 +1800,10 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                             names="、".join(locked_chars) if locked_chars else T("fn_char_none", lg)
                         ),
                     )
+                    live_char_target = int(
+                        st.session_state.get(f"fn_char_total_{idx}", char_default)
+                    )
+                    st.session_state[f"_fc_char_target_{idx}"] = live_char_target
                     if idx == 0:
                         st.session_state.fn_story_char_total = int(
                             st.session_state.get(f"fn_char_total_{idx}", char_default)
@@ -1784,6 +1815,11 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         _kickoff_beat_generation(idx, "function")
 
                     plan_labels = _fn_plan_labels(lg, idx)
+                    from narrativeloom.utils.display_utils import parse_character_profile_map
+
+                    prior_profiles = parse_character_profile_map(
+                        _prior_characters_block(idx, labels, lg)
+                    )
                     plan_i = render_unified_plan_carousel(
                         lg,
                         idx,
@@ -1791,12 +1827,11 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         feedback_renderer=_render_process_feedback,
                         role_names=chosen_roles,
                         locked_character_names=locked_chars,
-                        character_target_total=int(
-                            st.session_state.get(f"_fc_char_target_{idx}", char_default)
-                        ),
+                        character_target_total=live_char_target,
                         renormalize_on_render=True,
                         seed=st.session_state.get("seed") or "",
                         beat_index=idx,
+                        prior_character_profiles=prior_profiles,
                         cards_per_page=2,
                         plan_labels=plan_labels,
                     )
@@ -1829,11 +1864,10 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                                 role_names=chosen_roles,
                                 lang=lg,
                                 locked_names=locked_chars,
-                                character_target_total=int(
-                                    st.session_state.get(f"_fc_char_target_{idx}", char_default)
-                                ),
+                                character_target_total=live_char_target,
                                 beat_index=idx,
                                 seed=st.session_state.get("seed") or "",
+                                prior_character_profiles=prior_profiles,
                             )
                             user_edited = 1 if mt != (default_outline or "").strip() else 0
                             pick_i = int(st.session_state.get(unified_plan_pick_key(idx), plan_i))
@@ -1927,6 +1961,7 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                 "current_beat": st.session_state.current_beat,
                 "background_setting": st.session_state.background_setting,
                 "background_characters": st.session_state.background_characters,
+                "preset_protagonist_names": st.session_state.get("preset_protagonist_names") or [],
                 "bg_phase_done": st.session_state.bg_phase_done,
                 "bg_world_options": st.session_state.get("bg_world_options"),
                 "bg_char_options": st.session_state.get("bg_char_options"),
@@ -1952,6 +1987,7 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                 "current_beat": st.session_state.current_beat,
                 "background_setting": st.session_state.background_setting,
                 "background_characters": st.session_state.background_characters,
+                "preset_protagonist_names": st.session_state.get("preset_protagonist_names") or [],
                 "bg_phase_done": st.session_state.bg_phase_done,
                 "bg_world_options": st.session_state.get("bg_world_options"),
                 "bg_char_options": st.session_state.get("bg_char_options"),
