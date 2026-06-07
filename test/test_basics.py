@@ -774,8 +774,43 @@ def test_functional_preserves_wizard_preset_protagonist():
     names = _sculptor_names(out)
     assert len(names) == 2
     assert "达芬奇" in names
+    assert "向导既定主角" not in out
     assert "控中" not in out
     assert "任何以" not in out
+    da_vinci_desc = out.split("- 达芬奇：", 1)[-1].split("\n", 1)[0]
+    assert len(da_vinci_desc.strip()) >= 8
+    assert "向导既定主角" not in da_vinci_desc
+
+
+def test_functional_locked_names_get_setting_aware_bios():
+    from narrativeloom.utils.display_utils import normalize_single_unified_outline
+
+    seed = "我的导师来自新疆克拉玛依"
+    locked = ["达芬奇", "热依扎"]
+    raw = """【设定构建师】
+- 地点：2147年中国空间站天穹号近地轨道
+- 时间：2147年
+- 场景：零重力生物实验舱
+【人物塑造师】
+- 达芬奇：向导既定主角
+- 热依扎：向导既定主角
+【剧情逻辑师】
+- 达芬奇在实验舱发现导航数据干扰
+- 热依扎与达芬奇在实验室相遇
+【冲突设计师】
+- 核心矛盾：科研伦理与艺术执念"""
+    out = normalize_single_unified_outline(
+        raw,
+        role_names=["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"],
+        locked_names=locked,
+        character_target_total=2,
+        seed=seed,
+        prior_character_profiles={"达芬奇": "向导既定主角", "热依扎": "向导既定主角"},
+    )
+    assert "向导既定主角" not in out
+    assert "达芬奇" in out and "热依扎" in out
+    sculptor = out.split("【人物塑造师】")[-1].split("【")[0]
+    assert "2147" in sculptor or "空间站" in sculptor or "实验" in sculptor
 
 
 def test_functional_sculptor_exact_count_with_locked():

@@ -126,6 +126,7 @@ _PLACEHOLDER_CHARACTER_DESC = (
     "与本节冲突相关",
     "本节主要人物",
     "行动推动当前情节",
+    "向导既定主角",
 )
 
 
@@ -134,6 +135,16 @@ def _is_placeholder_character_desc(desc: str) -> bool:
     if not d or len(d) < 2:
         return True
     return any(p in d for p in _PLACEHOLDER_CHARACTER_DESC)
+
+
+def _location_hint(setting: str) -> str:
+    """仅取设定中的地点短语，避免把时间/场景标签拼进人物句。"""
+    for ln in (setting or "").splitlines():
+        t = re.sub(r"^[-*•·]\s*", "", ln.strip())
+        m = re.match(r"^(?:地点|Location)[：:]\s*(.+)$", t, re.I)
+        if m:
+            return m.group(1).strip().rstrip("，,；; ")[:32]
+    return _plain_setting_hint(setting)
 
 
 def _plain_setting_hint(setting: str) -> str:
@@ -160,7 +171,7 @@ def _resolve_character_description(
 ) -> str:
     """为人物生成具体设定句，禁止占位/承接类无效描述。"""
     prior = lookup_character_profile(name, prior_profiles)
-    if prior:
+    if prior and not _is_placeholder_character_desc(prior):
         return prior
     d = (desc or "").strip()
     if d and not _is_placeholder_character_desc(d):
@@ -171,6 +182,9 @@ def _resolve_character_description(
                 if v and not _is_placeholder_character_desc(v):
                     return v
     ctx_plot = "\n".join(x for x in (seed, key_events) if x)
+    archetype = _setting_archetype_trait(name, setting, seed)
+    if archetype:
+        return archetype
     inferred = _infer_sculptor_trait(name, ctx_plot, setting)
     trait_desc = inferred.split("：", 1)[-1].strip() if "：" in inferred else inferred.strip()
     if trait_desc and not _is_placeholder_character_desc(trait_desc):
@@ -2305,6 +2319,32 @@ def _sculptor_line_by_name(body: str) -> Dict[str, str]:
     return out
 
 
+def _setting_archetype_trait(name: str, setting_text: str, seed_text: str = "") -> str:
+    """按设定/种子语境为锁定主角推断一句具体身份（功能化补全用）。"""
+    hint = _location_hint(setting_text) or (setting_text or "").strip()[:28]
+    blob = f"{seed_text}\n{setting_text}".strip()
+    if not blob:
+        return ""
+    idx = sum(ord(c) for c in name) % 4
+    if re.search(r"(空间站|近地轨道|天穹|零重力|轨道站|航天|生物实验舱|脑机|量子)", blob):
+        roles = ("驻站科学家", "实验主理人", "航天工程师", "量子研究员")
+        scene = hint or "空间站实验舱"
+        return f"{roles[idx]}，在{scene}推进关键观测"
+    if re.search(r"(灵脉|魔法|祭坛|奇幻|星脉|秘境|地下 cavity|魔腔|蓝焰|晶石)", blob):
+        roles = ("术式学徒", "秘境向导", "炼金师", "守护者")
+        scene = hint or "秘境深处"
+        return f"{roles[idx]}，在{scene}追寻失落的线索"
+    if re.search(r"(克拉玛依|炼油|油田|油城|油井|地下城)", blob):
+        loc = "克拉玛依" if "克拉玛依" in blob else (hint or "油城")
+        roles = ("本地向导", "油田子弟", "晶石导师", "田野记录者")
+        return f"来自{loc}的{roles[idx]}，熟稔本地秘辛与风土"
+    if re.search(r"(纪念馆|老年|活动中心|退休|口述)", blob):
+        return f"外地访学者，在{hint or '纪念馆'}做田野记录"
+    if re.search(r"(实验室|校园|大学|研究生|仪器)", blob):
+        return f"青年研究者，在{hint or '实验室'}追问细节"
+    return ""
+
+
 def _infer_sculptor_trait(name: str, plot_text: str, setting_text: str = "") -> str:
     """从剧情/设定上下文推断一句短身份，禁止「本小节出场」类占位。"""
     ctx = f"{plot_text}\n{setting_text}".strip()
@@ -2390,12 +2430,17 @@ def _infer_sculptor_trait(name: str, plot_text: str, setting_text: str = "") -> 
             plot,
         ):
             return f"- {name}：外来访客，初识本地"
+    archetype = _setting_archetype_trait(name, setting, plot_text)
+    if archetype:
+        return f"- {name}：{archetype}"
     return f"- {name}：本节主要人物，行动推动当前情节"
 
 
 def _sculptor_line_needs_rewrite(name: str, description: str) -> bool:
     desc = (description or "").strip()
     if _is_meta_character_label(name):
+        return True
+    if _is_placeholder_character_desc(desc):
         return True
     if not desc or re.search(r"本小节出场", desc):
         return True
@@ -2425,8 +2470,23 @@ def _polish_sculptor_line(
     from narrativeloom.utils.display_utils import _normalize_sculptor_line_name
 
     name = _normalize_sculptor_line_name(m.group(1).strip(), context=ctx)
-    rest = probe[m.end() :].strip()
-    if not name or not _is_pure_person_name(name):
+    rest = probe[m.end() :].strip().lstrip("：:").strip()
+    if not name:
+        return ""
+    from narrativeloom.domain.character_names import (
+        _is_compound_cast_name,
+        _is_person,
+        _is_seed_cast_name,
+    )
+
+    name_ok = (
+        _is_pure_person_name(name)
+        or _is_person(name)
+        or _is_compound_cast_name(name)
+        or _is_seed_cast_name(name, context=ctx)
+        or re.fullmatch(r"[\u4e00-\u9fff]{2,6}", name)
+    )
+    if not name_ok:
         return ""
     if _sculptor_line_needs_rewrite(name, rest):
         return _infer_sculptor_trait(name, plot_text, setting_text)
@@ -2467,7 +2527,9 @@ def complete_sculptor_body(
     prior_block = ""
     if prior_character_profiles:
         prior_block = "\n".join(
-            f"- {k}：{v}" for k, v in prior_character_profiles.items() if k and v
+            f"- {k}：{v}"
+            for k, v in prior_character_profiles.items()
+            if k and v and not _is_placeholder_character_desc(v)
         )
     out = sanitize_typified_characters(
         body,
@@ -2480,6 +2542,31 @@ def complete_sculptor_body(
         strict_narrative_allowlist=False,
         max_characters=14,
     )
+    polished: List[str] = []
+    for line in (out or "").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        line_out = _polish_sculptor_line(s, plot_text=plot_blob, setting_text=setting_blob)
+        if not line_out:
+            probe = s if s.startswith("-") else f"- {s}"
+            m = _CHAR_NAME_LINE.match(probe)
+            if m:
+                raw_name = m.group(1).strip()
+                raw_desc = probe.split("：", 1)[-1].split(":", 1)[-1].strip()
+                resolved = _resolve_character_description(
+                    raw_name,
+                    raw_desc,
+                    seed=seed,
+                    setting=setting_blob,
+                    key_events=plot_blob,
+                    prior_profiles=prior_character_profiles,
+                )
+                line_out = f"- {raw_name}：{resolved}"
+            else:
+                line_out = s if s.startswith("-") else f"- {s}"
+        polished.append(line_out)
+    out = "\n".join(polished)
     return scrub_functional_fragment(out)
 
 
@@ -2758,7 +2845,7 @@ def normalize_single_unified_outline(
                 body = abbreviate_established_sections(
                     body, title=title, beat_index=beat_index, locked_names=locked
                 )
-            body = condense_role_body(body, max_lines=sculpt_target, max_chars=44)
+            body = condense_role_body(body, max_lines=sculpt_target, max_chars=120)
         elif "设定构建" in title or "Setting" in title:
             body = format_setting_architect_body(body)
             body = abbreviate_established_sections(

@@ -443,9 +443,9 @@ def _prior_characters_block(
     parts: List[str] = []
     preset = st.session_state.get("preset_protagonist_names") or []
     if preset:
-        preset_lines = "\n".join(f"- {n}：向导既定主角" for n in preset if n)
-        if preset_lines:
-            parts.append(f"【向导既定主角（各小节须出现）】\n{preset_lines}")
+        parts.append(
+            f"【向导既定主角（各小节须出现）】\n" + "、".join(n for n in preset if n)
+        )
     bg = (st.session_state.get("background_characters") or "").strip()
     if bg:
         parts.append(f"【背景人物档案】\n{bg[:2000]}")
