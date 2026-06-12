@@ -1018,6 +1018,49 @@ def test_canonicalize_to_locked_name():
     assert canonicalize_to_locked_name("Peppa", ["Da Vinci", "Peppa"]) == "Peppa"
 
 
+def test_condense_role_body_english_preserves_full_lines():
+    from narrativeloom.utils.display_utils import condense_role_body
+
+    long_line = (
+        "- Location: A sterile biolab on a space station orbiting Earth in the year 2147"
+    )
+    out = condense_role_body(long_line, max_lines=3, max_chars=44, lang="en")
+    assert "space station" in out
+    assert not out.rstrip().endswith("statio")
+
+
+def test_normalize_unified_en_setting_not_midword_cut():
+    from narrativeloom.utils.display_utils import normalize_single_unified_outline
+
+    outline = (
+        "【Setting Architect】\n"
+        "- Location: A sterile biolab on a space station orbiting Earth\n"
+        "- Time: Late afternoon during a solar flare alert\n"
+        "【Character Sculptor】\n"
+        "- Leonardo da Vinci: painter stranded aboard the station\n"
+        "- Peppa: curious pig mascot in a biolab suit\n"
+        "【Plot Logic Designer】\n"
+        "- Because Leonardo's art requires authentic fear, he tests pigments on Peppa\n"
+        "【Conflict Designer】\n"
+        "- Core conflict: Control over biology versus machine logic\n"
+    )
+    out = normalize_single_unified_outline(
+        outline,
+        role_names=[
+            "Setting Architect",
+            "Character Sculptor",
+            "Plot Logic Designer",
+            "Conflict Designer",
+        ],
+        lang="en",
+        seed="Leonardo and Peppa on a space station",
+        locked_names=["Leonardo da Vinci", "Peppa"],
+    )
+    assert "space station" in out
+    assert "machine logic" in out
+    assert "statio\n" not in out and not out.endswith("statio")
+
+
 def test_localize_scrubs_zh_conflict_and_character_placeholders():
     from narrativeloom.utils.display_utils import localize_functional_outline
 

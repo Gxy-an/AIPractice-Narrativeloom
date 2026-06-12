@@ -458,6 +458,7 @@ def _resanitize_typified_candidates(
             prior_characters_block=prior,
             strict_narrative_allowlist=False,
             max_characters=8,
+            lang=lg,
         )
         out.append((name, item))
     return out

@@ -762,24 +762,25 @@ _SCULPTOR_STATUS_CUT = re.compile(
 )
 
 
-def sanitize_sculptor_description(desc: str, *, max_chars: int = 40) -> str:
+def sanitize_sculptor_description(desc: str, *, max_chars: int = 40, lang: str = "zh") -> str:
     """功能化人物行：去掉标签式用语，精简为短句直接叙述。"""
     s = (desc or "").strip()
     if not s:
         return s
+    cap = 120 if _is_en_lang(lang) else max_chars
     s = _SCULPTOR_STATUS_CUT.sub("", s).strip()
     s = re.sub(r"(?:动机是|关系是|性格是|身份是|状态是)\s*", "", s)
     s = re.sub(r"[,，]{2,}", "，", s)
     s = re.sub(r"\s+", " ", s).strip("，,、 ")
-    if len(s) > max_chars:
+    if len(s) > cap:
         for sep in ("，", ",", "；", ";"):
             if sep in s:
                 head = s.split(sep, 1)[0].strip()
                 if len(head) >= 8:
                     s = head
                     break
-        if len(s) > max_chars:
-            s = s[:max_chars]
+        if len(s) > cap:
+            s = _truncate_text_at_word(s, cap) if _is_en_lang(lang) else s[:cap]
     return s
 
 
@@ -2993,11 +2994,14 @@ def abbreviate_established_sections(
     title: str,
     beat_index: int,
     locked_names: Optional[List[str]] = None,
+    lang: str = "zh",
 ) -> str:
     """后续小节：已知设定/已定人物仅保留变化，避免方案越写越长。"""
     if beat_index <= 0 or not (body or "").strip():
         return body
     locked = [n.strip() for n in (locked_names or []) if (n or "").strip()]
+    setting_cap = 120 if _is_en_lang(lang) else 36
+    char_cap = 120 if _is_en_lang(lang) else 44
     if "设定构建" in title or "Setting" in title:
         out: List[str] = []
         for ln in body.splitlines():
@@ -3006,9 +3010,15 @@ def abbreviate_established_sections(
                 continue
             for lab in ("地点", "时间", "场景", "规则", "Location", "Time", "Scene", "Rules"):
                 if s.startswith(f"{lab}：") or s.startswith(f"{lab}:"):
+                    sep = ": " if _is_en_lang(lang) else "："
                     val = s.split("：", 1)[-1].split(":", 1)[-1].strip()
-                    if len(val) > 36:
-                        s = f"{lab}：{val[:36]}"
+                    if len(val) > setting_cap:
+                        val = (
+                            _truncate_text_at_word(val, setting_cap)
+                            if _is_en_lang(lang)
+                            else val[:setting_cap]
+                        )
+                    s = f"{lab}{sep}{val}"
                     break
             out.append(s if s.startswith("-") else f"- {s}")
         return "\n".join(out)
@@ -3024,7 +3034,7 @@ def abbreviate_established_sections(
                 continue
             name = _canonical_person_name(m.group(1).strip())
             desc = probe.split("：", 1)[-1].split(":", 1)[-1].strip()
-            if name in locked and len(desc) > 44:
+            if name in locked and len(desc) > char_cap:
                 brief = ""
                 for pat in (
                     r"当前状态[：:为]?([^；;，,]+)",
@@ -3037,8 +3047,11 @@ def abbreviate_established_sections(
                         break
                 if not brief:
                     segs = [x.strip() for x in re.split(r"[，,；;]", desc) if x.strip()]
-                    brief = segs[-1] if segs else desc[:44]
-                out.append(f"- {name}：{brief}")
+                    brief = segs[-1] if segs else desc[:char_cap]
+                if _is_en_lang(lang) and len(brief) > char_cap:
+                    brief = _truncate_text_at_word(brief, char_cap)
+                sep = _name_desc_sep(lang)
+                out.append(f"- {name}{sep}{brief}")
             else:
                 out.append(probe if probe.startswith("-") else f"- {name}：{desc}")
         return "\n".join(out)
@@ -3051,8 +3064,9 @@ def condense_role_body(
     max_lines: int = 8,
     max_chars: int = 160,
     truncate: bool = False,
+    lang: str = "zh",
 ) -> str:
-    """整理职能分块为 bullet 列表；默认保留完整句子，不追加省略号。"""
+    """整理职能分块为 bullet 列表；英文默认保留整句，仅在 truncate 时在词边界截断。"""
     raw = (body or "").strip()
     if not raw:
         return raw
@@ -3061,10 +3075,14 @@ def condense_role_body(
         s = ln.strip().lstrip("-·•").strip()
         if not s or s in _KEY_EVENTS_TRIVIAL:
             continue
-        if truncate and len(s) > max_chars:
-            s = s[: max_chars - 1] + "…"
-        elif len(s) > max_chars:
-            s = s[:max_chars]
+        if len(s) > max_chars:
+            if _is_en_lang(lang):
+                if truncate:
+                    s = _truncate_text_at_word(s, max_chars)
+            elif truncate:
+                s = s[: max_chars - 1] + "…"
+            else:
+                s = s[:max_chars]
         out.append(f"- {s}")
         if len(out) >= max_lines:
             break
@@ -3125,8 +3143,9 @@ def normalize_single_unified_outline(
         len(locked),
         int(character_target_total) if character_target_total is not None else len(locked),
     )
-    setting_cap = 36 if beat_index > 0 else 44
-    plot_cap = 48
+    setting_cap = 140 if _is_en_lang(lang) else (36 if beat_index > 0 else 44)
+    plot_cap = 220 if _is_en_lang(lang) else 48
+    char_cap = 180 if _is_en_lang(lang) else 120
     plot_sources: List[str] = []
     narrative_sources: List[str] = []
     setting_sources: List[str] = []
@@ -3170,28 +3189,28 @@ def normalize_single_unified_outline(
             )
             if beat_index > 0:
                 body = abbreviate_established_sections(
-                    body, title=title, beat_index=beat_index, locked_names=locked
+                    body, title=title, beat_index=beat_index, locked_names=locked, lang=lang
                 )
-            body = condense_role_body(body, max_lines=sculpt_target, max_chars=120)
+            body = condense_role_body(body, max_lines=sculpt_target, max_chars=char_cap, lang=lang)
         elif _is_setting_architect_title(title):
             body = format_setting_architect_body(body, lang=lang)
             body = abbreviate_established_sections(
-                body, title=title, beat_index=beat_index, locked_names=locked
+                body, title=title, beat_index=beat_index, locked_names=locked, lang=lang
             )
             body = condense_role_body(
-                body, max_lines=4, max_chars=setting_cap
+                body, max_lines=4, max_chars=setting_cap, lang=lang
             )
         elif _is_plot_logic_title(title):
             body = expand_plot_conflict_bullets(body)
-            body = condense_role_body(body, max_lines=5, max_chars=plot_cap)
+            body = condense_role_body(body, max_lines=5, max_chars=plot_cap, lang=lang)
         elif _is_conflict_designer_title(title):
             body = strip_conflict_obstacle_lines(body)
             body = expand_plot_conflict_bullets(body, drop_obstacles=True)
-            body = condense_role_body(body, max_lines=4, max_chars=plot_cap)
+            body = condense_role_body(body, max_lines=4, max_chars=plot_cap, lang=lang)
         elif "连贯" in title or "Consistency" in title:
-            body = condense_role_body(body, max_lines=2, max_chars=36)
+            body = condense_role_body(body, max_lines=2, max_chars=80 if _is_en_lang(lang) else 36, lang=lang)
         else:
-            body = condense_role_body(body, max_lines=3, max_chars=40)
+            body = condense_role_body(body, max_lines=3, max_chars=100 if _is_en_lang(lang) else 40, lang=lang)
         processed.append((title, scrub_functional_fragment(strip_mutation_markers(body))))
     final = _ordered_unified_sections(processed, role_names, lang=lang)
     return localize_functional_outline(rebuild_merge_sections(final), lang=lang)

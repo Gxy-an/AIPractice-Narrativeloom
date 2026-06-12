@@ -1118,6 +1118,7 @@ def generate_typified_beat(
         prior_characters_block=prior_characters_block,
         strict_narrative_allowlist=False,
         max_characters=8,
+        lang=lang,
     )
     if not typified_characters_meaningful(data.get("characters")) and (data.get("setting") or "").strip():
         data["characters"] = "- （待补全人物）"

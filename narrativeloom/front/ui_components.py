@@ -299,6 +299,7 @@ def render_typified_carousel(
                 prior_characters_block=prior_characters_block,
                 strict_narrative_allowlist=False,
                 max_characters=8,
+                lang=lg,
             )
             renormed.append((name, item))
         display_candidates = renormed

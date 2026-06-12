@@ -395,9 +395,19 @@ div.nl-landing-lang-anchor + div[data-testid="stSelectbox"] label {{
     padding: 0.5rem 0.75rem 0.55rem;
     max-height: 9rem;
     overflow-y: auto;
+    overflow-x: hidden;
     font-size: 0.86rem;
     line-height: 1.48;
     color: var(--nl-body);
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}}
+.nl-fn-module-body .nl-ul,
+.nl-fn-module-body .nl-ul li {{
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    white-space: normal;
 }}
 .nl-consent-scroll .nl-fn-module-body {{
     max-height: none;
