@@ -631,7 +631,8 @@ def review_merged_text(
     if lang == "en":
         system = (
             "You are a narrative editor. Align names with the canon with minimal edits. "
-            "Output JSON: merged, review_notes."
+            "Output JSON: merged, review_notes. "
+            "CRITICAL LANGUAGE: merged text MUST remain entirely in English."
         )
         user = f"Canon:\n{canon_sheet or '(none)'}\n\nExcerpts:\n{rag_excerpt or '(none)'}\n\nText:\n{merged_text}"
     else:
@@ -924,6 +925,8 @@ def generate_typified_beat(
             "DIVERSITY: You ONLY represent this genre persona; setting and characters must reflect THIS genre's "
             "distinct motifs, scene types, and conflict hooks — clearly different from what other genre personas would produce "
             "(do not reuse the same location template or character roster with synonym swaps). "
+            "CRITICAL LANGUAGE: All setting, characters, and key_events values MUST be written in English only. "
+            "Never output Chinese characters. "
             + proc
         )
         user = (
@@ -1254,6 +1257,16 @@ _UNIFIED_FN_TONE_ZH = (
     "避免四案都像「任务简报」。"
 )
 
+_UNIFIED_FN_BULLET_FORMAT_EN = (
+    "BULLET FORMAT (English labels only): "
+    "Setting Architect: '- Location: ...', '- Time: ...', optional '- Scene:', '- Rules:'. "
+    "Conflict Designer: '- Core conflict: ...', '- Dramatic tension: ...', '- Suspense: ...' "
+    "(no obstacle column). "
+    "Plot Logic Designer: 3–5 causal bullets starting with '- '. "
+    "Character Sculptor: '- Name: role/motive in English'. "
+    "Never use Chinese labels like 地点/时间/核心矛盾."
+)
+
 _UNIFIED_FN_BULLET_FORMAT_ZH = (
     "【分条格式】剧情逻辑师：因果链、关键突变各占独立一行（以「- 」开头）；"
     "冲突设计师：仅写核心矛盾、戏剧冲突、悬念（禁止输出「阻碍」「障碍」「角色阻碍」栏）；"
@@ -1369,8 +1382,12 @@ def generate_unified_functional_plans(
     )
     seed_cast = extract_seed_cast_names(seed)
     role_names = [n for n, _ in roles]
-    roles_block = "\n".join(f"- {n}：{t}" for n, t in roles)
-    headers = "、".join(f"【{n}】" for n in role_names)
+    if lang == "en":
+        roles_block = "\n".join(f"- {n}: {t}" for n, t in roles)
+        headers = ", ".join(f"[{n}]" for n in role_names)
+    else:
+        roles_block = "\n".join(f"- {n}：{t}" for n, t in roles)
+        headers = "、".join(f"【{n}】" for n in role_names)
     prior_cap = _unified_fn_prior_cap(beat_index, num_sections, feedback_process)
     length_block = _unified_fn_length_guidance(beat_index, num_sections, lang)
     pf_instr = (
@@ -1398,8 +1415,8 @@ def generate_unified_functional_plans(
     )
     has_sculptor = any(is_character_sculptor_role(n, lang) for n in role_names)
     setting_fmt = (
-        "Setting Architect: use SEPARATE bullet lines for 地点 and 时间 (never combine on one line); "
-        "then 场景 and 规则 if needed. "
+        "Setting Architect: use SEPARATE bullet lines for Location and Time (never combine on one line); "
+        "then Scene and Rules if needed. "
         if lang == "en"
         else "【设定构建师】必须用独立两行分别写「- 地点：…」「- 时间：…」，禁止把地点与时间写在同一行；可再写场景、规则。"
     )
@@ -1432,12 +1449,24 @@ def generate_unified_functional_plans(
             )
 
     if lang == "en":
+        sculptor_sys = ""
+        if has_sculptor:
+            sculptor_sys = (
+                f"Character Sculptor: exactly {sculpt_target} named characters (one line each, no placeholders); "
+                "other role blocks may ONLY reference these names; locked names keep exact spelling. "
+                "Conflict Designer: core conflict, dramatic tension, suspense only (no obstacle column). "
+            )
         system = (
             f"You are the narrative orchestrator. Output JSON only. "
             f'Return exactly {{"variants":[...]}} with {plan_count} objects. '
             f'Each variant.outline is ONE complete beat merge: role sections {headers}, '
             "each section bullet lines starting with '- '. All roles must collaborate without contradiction. "
+            "CRITICAL LANGUAGE: Every bullet in every role section MUST be written in English only. "
+            "Never output Chinese characters in outline text. "
+            "Even if canon or prior story contains non-English text, still write this outline entirely in English. "
+            f"{_UNIFIED_FN_BULLET_FORMAT_EN} "
             f"{setting_fmt} "
+            f"{sculptor_sys}"
             "Variants must differ sharply. Do NOT repeat events already in prior beats; only new causal steps. "
             + arc_events_en
             + " "
@@ -1492,53 +1521,118 @@ def generate_unified_functional_plans(
         else:
             user += f"\n【创意种子既定人物（人物塑造师须全部保留，禁止替换或改名）】{'、'.join(seed_cast)}\n"
     if (prior_summary or "").strip():
-        user += f"\n【已定前文】\n{(prior_summary or '')[:prior_cap]}\n"
-        if beat_index > 0 and lang == "zh":
-            user += (
-                f"\n{_UNIFIED_FN_BREVITY_ZH}\n"
-                "已定人物与基础设定请简写，仅补充本小节新变化。\n"
-            )
+        if lang == "en":
+            user += f"\nLOCKED PRIOR STORY (linear continuation required):\n{(prior_summary or '')[:prior_cap]}\n"
+            if beat_index > 0:
+                user += (
+                    "If prior story already covers character identities and setting, "
+                    "briefly recap known facts only; reserve space for new changes this beat.\n"
+                )
+        else:
+            user += f"\n【已定前文】\n{(prior_summary or '')[:prior_cap]}\n"
+            if beat_index > 0:
+                user += (
+                    f"\n{_UNIFIED_FN_BREVITY_ZH}\n"
+                    "已定人物与基础设定请简写，仅补充本小节新变化。\n"
+                )
     else:
-        user += "\n【已定前文】（尚无）\n"
+        user += (
+            "\nPRIOR STORY: (none yet — opening beat)\n"
+            if lang == "en"
+            else "\n【已定前文】（尚无）\n"
+        )
     if anti_repetition_digest.strip():
-        user += f"\n【避免重复】下列内容前文已写过，勿在本小节再次复述：\n{anti_repetition_digest[:1200]}\n"
-    if prior_beat_homogeneity_digest.strip():
-        user += (
-            f"\n【避免与已定小节同质化】下列为已定稿小节的设定/人物/冲突摘要，"
-            "本小节四案须在推进新因果的同时，避免重复相同场景类型、人物关系模板与矛盾套路：\n"
-            f"{prior_beat_homogeneity_digest[:1600]}\n"
-        )
-    if canon_sheet:
-        user += f"\n【设定清单】\n{(canon_sheet or '')[:2000]}\n"
-    if rag_excerpt:
-        user += f"\n【相关摘录】\n{(rag_excerpt or '')[:1500]}\n"
-    if locked_setting_baseline.strip():
-        user += (
-            f"\n【锁定时空设定（四案必须共用，仅可微调细节，禁止换场景/时代/世界观）】\n"
-            f"{locked_setting_baseline.strip()[:1200]}\n"
-        )
-    if has_sculptor and locked:
-        user += f"\n【前文已定人物须保留】{'、'.join(locked)}\n"
-        wizard_only = [n for n in locked if n not in seed_cast]
-        if wizard_only and lang != "en":
-            user += f"【向导既定主角（人物塑造师须全部保留）】{'、'.join(wizard_only)}\n"
-        elif wizard_only:
+        if lang == "en":
             user += (
-                f"WIZARD LOCKED PROTAGONISTS (must all appear in Character Sculptor): "
-                f"{', '.join(wizard_only)}\n"
+                f"\nDO NOT REPEAT (already covered in prior beats):\n{anti_repetition_digest[:1200]}\n"
             )
+        else:
+            user += f"\n【避免重复】下列内容前文已写过，勿在本小节再次复述：\n{anti_repetition_digest[:1200]}\n"
+    if prior_beat_homogeneity_digest.strip():
+        if lang == "en":
+            user += (
+                "\nAVOID HOMOGENEITY with confirmed prior beats (vary scene types, relationship templates, "
+                "and conflict patterns while advancing new causality):\n"
+                f"{prior_beat_homogeneity_digest[:1600]}\n"
+            )
+        else:
+            user += (
+                f"\n【避免与已定小节同质化】下列为已定稿小节的设定/人物/冲突摘要，"
+                "本小节四案须在推进新因果的同时，避免重复相同场景类型、人物关系模板与矛盾套路：\n"
+                f"{prior_beat_homogeneity_digest[:1600]}\n"
+            )
+    if canon_sheet:
+        if lang == "en":
+            user += f"\nCANON SHEET (must follow):\n{(canon_sheet or '')[:2000]}\n"
+        else:
+            user += f"\n【设定清单】\n{(canon_sheet or '')[:2000]}\n"
+    if rag_excerpt:
+        if lang == "en":
+            user += f"\nRETRIEVED CONTEXT:\n{(rag_excerpt or '')[:1500]}\n"
+        else:
+            user += f"\n【相关摘录】\n{(rag_excerpt or '')[:1500]}\n"
+    if locked_setting_baseline.strip():
+        if lang == "en":
+            user += (
+                "\nLOCKED SETTING BASELINE (all variants must share; no era/world swap):\n"
+                f"{locked_setting_baseline.strip()[:1200]}\n"
+            )
+        else:
+            user += (
+                f"\n【锁定时空设定（四案必须共用，仅可微调细节，禁止换场景/时代/世界观）】\n"
+                f"{locked_setting_baseline.strip()[:1200]}\n"
+            )
+    if has_sculptor and locked:
+        if lang == "en":
+            user += f"\nLOCKED CHARACTER NAMES (must all appear in Character Sculptor): {', '.join(locked)}\n"
+        else:
+            user += f"\n【前文已定人物须保留】{'、'.join(locked)}\n"
+        wizard_only = [n for n in locked if n not in seed_cast]
+        if wizard_only:
+            if lang == "en":
+                user += (
+                    f"WIZARD LOCKED PROTAGONISTS (must all appear in Character Sculptor): "
+                    f"{', '.join(wizard_only)}\n"
+                )
+            else:
+                user += f"【向导既定主角（人物塑造师须全部保留）】{'、'.join(wizard_only)}\n"
     if has_sculptor and sculpt_target > 0:
         extra = max(0, sculpt_target - len(locked))
+        if lang == "en":
+            user += (
+                f"\nCHARACTER SCULPTOR HARD RULE: exactly {sculpt_target} named characters (one line each); "
+                f"other role blocks may ONLY reference these {sculpt_target} names; "
+                "locked names must be preserved with exact spelling."
+            )
+            if extra > 0 and locked:
+                user += f" Besides the {len(locked)} locked names, add {extra} new named characters."
+            user += "\n"
+        else:
+            user += (
+                f"\n【人物塑造师硬性要求】恰好 {sculpt_target} 名真实角色（每人一行，禁止占位句）；"
+                f"其它职能分块只能引用这 {sculpt_target} 人的姓名，不得新增；"
+                "前文已定人物须保留且不得改名。"
+            )
+            if extra > 0 and locked:
+                user += f" 除已锁定的 {len(locked)} 人外，须再新增 {extra} 名新角色。"
+            user += "\n"
+    if lang == "en":
         user += (
-            f"\n【人物塑造师硬性要求】恰好 {sculpt_target} 名真实角色（每人一行，禁止占位句）；"
-            f"其它职能分块只能引用这 {sculpt_target} 人的姓名，不得新增；"
-            "前文已定人物须保留且不得改名。"
+            f"\nOutput {plan_count} complete plan variants as JSON. "
+            "ALL outline bullet text MUST be in English.\n"
         )
-        if extra > 0 and locked:
-            user += f" 除已锁定的 {len(locked)} 人外，须再新增 {extra} 名新角色。"
-        user += "\n"
-    user += f"\n请输出 {plan_count} 个总体方案 JSON。"
-    if lang == "zh" and beat_index == 0 and not locked_worldview:
+    else:
+        user += f"\n请输出 {plan_count} 个总体方案 JSON。"
+    if lang == "en" and beat_index == 0 and not locked_worldview:
+        user += f"\n{_UNIFIED_FN_WORLDVIEW_EN}\n"
+    elif lang == "en" and locked_worldview and beat_index > 0:
+        user += (
+            f"\nIMPORTANT: All variants stay in locked worldview «{_worldview_label(locked_worldview, lang)}»; "
+            "differentiate conflict axes and event angles only.\n"
+            "Preserve locked characters but vary status updates, relationships, and new character angles "
+            "across the four plans.\n"
+        )
+    elif lang == "zh" and beat_index == 0 and not locked_worldview:
         user += f"\n{_UNIFIED_FN_WORLDVIEW_ZH}"
     elif lang == "zh" and locked_worldview and beat_index > 0:
         user += (
@@ -2350,14 +2444,19 @@ def expand_prose(
             '{"title":"Short literary title for the whole piece, 4–12 words, no section numbers","prose":"..."} . '
             "The prose MUST NOT use Markdown '#' headings, section numbering, or meta labels like 'Opening'; "
             "start directly in scene. "
-            "CRITICAL: prose must be ONE JSON string; use \\n\\n between paragraphs, NEVER \";\" between quoted chunks."
+            "CRITICAL: prose must be ONE JSON string; use \\n\\n between paragraphs, NEVER \";\" between quoted chunks. "
+            "CRITICAL LANGUAGE: title and prose MUST be written entirely in English. Never use Chinese characters."
         )
         user = f"Sparkles: {seed}\n\n"
         if canon_sheet:
             user += f"Canon:\n{canon_sheet}\n\n"
         if rag_excerpt:
             user += f"Excerpts:\n{rag_excerpt}\n\n"
-        user += f"Beat compilation ({n_sec} sections):\n{bc}\n\nReturn JSON with title and prose."
+        user += f"Beat compilation ({n_sec} sections):\n{bc}\n\n"
+        user += (
+            "Write title and prose entirely in English even if the beat compilation contains other languages.\n"
+            "Return JSON with title and prose."
+        )
     else:
         system = (
             "你是资深中文文学小说作者。根据小节汇编扩写为具有文学质感的长叙事："

@@ -329,7 +329,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "carousel_next": "Next",
         "carousel_page": "Page {cur} / {total}",
         "pick_this_beat": "Pick",
-        "pick_this_variant": "Use this plan",
+        "pick_this_variant": "Pick",
         "fn_variant_carousel_hint": "Use the bar below each card to switch plans A/B/C, then pick one.",
         "brief_time_place": "Time · place",
         "brief_characters": "Characters",

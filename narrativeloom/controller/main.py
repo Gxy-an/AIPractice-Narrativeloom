@@ -116,17 +116,24 @@ def _sync_beat_len_to_num_sections() -> None:
         _resize_beat_arrays(_n_sections())
 
 
-def _body_canon_prefix() -> str:
+def _body_canon_prefix(lg: str = "zh") -> str:
+    en = (lg or "zh") == "en"
     parts: List[str] = []
     s = (st.session_state.get("background_setting") or "").strip()
     c = (st.session_state.get("background_characters") or "").strip()
     preset = st.session_state.get("preset_protagonist_names") or []
     if preset:
-        parts.append("【既定主角姓名（各小节须出现）】\n" + "、".join(str(n) for n in preset if n))
+        if en:
+            parts.append(
+                "【Preset protagonist names (must appear in every section)】\n"
+                + ", ".join(str(n) for n in preset if n)
+            )
+        else:
+            parts.append("【既定主角姓名（各小节须出现）】\n" + "、".join(str(n) for n in preset if n))
     if s:
-        parts.append("【世界设定纲要】\n" + s)
+        parts.append(("【World setting brief】\n" if en else "【世界设定纲要】\n") + s)
     if c:
-        parts.append("【人物档案纲要】\n" + c)
+        parts.append(("【Character profiles brief】\n" if en else "【人物档案纲要】\n") + c)
     return "\n\n".join(parts)
 
 
@@ -628,7 +635,9 @@ def _llm_cfg_fingerprint(cfg: Dict[str, Any]) -> str:
 def _rag_bundle(idx: int, labels: List[Tuple[str, str]], *, typified: bool = False) -> Tuple[str, str]:
     lg = _lg()
     prior_beats = [st.session_state.beats[i] for i in range(max(0, idx))]
-    canon = canon_sheet_from_beats(prior_beats, background_prefix=_body_canon_prefix())
+    canon = canon_sheet_from_beats(
+        prior_beats, background_prefix=_body_canon_prefix(lg), lang=lg
+    )
     if typified and idx <= 0:
         return canon[:1200] if canon else "", ""
     texts = [_beat_to_text(st.session_state.beats[i], lg) for i in range(idx)]
@@ -780,7 +789,7 @@ def _generate_unified_functional(
             prior_outlines.append(sn)
         elif st.session_state.beats[i] and st.session_state.beats[i].get("mode") == "functional":
             prior_outlines.append(str(st.session_state.beats[i].get("merged_outline") or ""))
-    homogeneity = build_fn_prior_homogeneity_digest(prior_outlines)
+    homogeneity = build_fn_prior_homogeneity_digest(prior_outlines, lang=lang)
     locked_wv = st.session_state.get("fn_locked_worldview")
     prior_chars = _prior_characters_block(beat_idx, labels, lang)
     return generate_unified_functional_plans(
@@ -898,9 +907,37 @@ def _generate_beat_candidates(
         if not fn_roles:
             st.warning(T("fn_recommend_empty", lg))
             return
-        st.session_state.functional_candidates = _generate_unified_functional(
+        fc = _generate_unified_functional(
             idx, llm_cfg, feedback_process, canon, rag, labels, lg, fn_roles
         )
+        fn_role_names = [r for r, _ in fn_roles]
+        locked_chars = _locked_character_names(idx, lg)
+        char_target = max(
+            2,
+            int(st.session_state.get(f"_fc_char_target_{idx}", _default_character_target(idx, lg))),
+            len(locked_chars),
+        )
+        from narrativeloom.utils.display_utils import parse_character_profile_map
+
+        prior_profiles = parse_character_profile_map(
+            _prior_characters_block(idx, labels, lg)
+        )
+        norm_variants: List[Dict[str, Any]] = []
+        for item in fc.get("variants") or []:
+            outline = str(item.get("outline") or "").strip()
+            if outline:
+                outline = normalize_single_unified_outline(
+                    outline,
+                    role_names=fn_role_names,
+                    lang=lg,
+                    locked_names=locked_chars,
+                    character_target_total=char_target,
+                    beat_index=idx,
+                    seed=st.session_state.get("seed") or "",
+                    prior_character_profiles=prior_profiles,
+                )
+            norm_variants.append({**item, "outline": outline})
+        st.session_state.functional_candidates = {**fc, "variants": norm_variants}
         st.session_state["_fc_beat_idx"] = idx
     st.session_state.beat_regen_count[idx] += 1
 
@@ -1096,7 +1133,9 @@ def _run_auto_expand_all(llm_cfg: Dict[str, Any], lg: str, n: int) -> None:
     if st.session_state.get("_auto_expand_tag") == tag and (st.session_state.expanded_prose or "").strip():
         return
     beat_objs = [st.session_state.beats[i] for i in range(n) if st.session_state.beats[i]]
-    full_canon = canon_sheet_from_beats(beat_objs, background_prefix=_body_canon_prefix())
+    full_canon = canon_sheet_from_beats(
+        beat_objs, background_prefix=_body_canon_prefix(lg), lang=lg
+    )
     all_chunks = build_chunks_from_beats(
         [_beat_to_text(st.session_state.beats[i], lg) for i in range(n) if st.session_state.beats[i]]
     )
@@ -1498,7 +1537,9 @@ def _render_antitrope_workflow(llm_cfg: Dict[str, Any], lg: str, n: int) -> None
 
     if st.button(T("antitrope_gen_btn", lg), key="antitrope_full_gen", type="primary"):
         beat_objs = [st.session_state.beats[i] for i in range(n) if st.session_state.beats[i]]
-        canon = canon_sheet_from_beats(beat_objs, background_prefix=_body_canon_prefix())
+        canon = canon_sheet_from_beats(
+            beat_objs, background_prefix=_body_canon_prefix(lg), lang=lg
+        )
         with st.spinner(T("antitrope_running", lg)):
             try:
                 pack = generate_antitrope_full_story(
@@ -1952,15 +1993,30 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         cards_per_page=2,
                         plan_labels=plan_labels,
                     )
+                    merge_sync_key = f"_fn_merge_sync_pick_{idx}"
+                    if 0 <= plan_i < len(variants):
+                        raw_outline = str(variants[plan_i].get("outline") or "").strip()
+                        if raw_outline and (
+                            st.session_state.get(merge_sync_key) != plan_i
+                            or not (st.session_state.get(f"merge_preview_{idx}") or "").strip()
+                        ):
+                            mt = normalize_single_unified_outline(
+                                raw_outline,
+                                role_names=chosen_roles,
+                                lang=lg,
+                                locked_names=locked_chars,
+                                character_target_total=live_char_target,
+                                beat_index=idx,
+                                seed=st.session_state.get("seed") or "",
+                                prior_character_profiles=prior_profiles,
+                            )
+                            st.session_state[f"merge_preview_{idx}"] = format_functional_merged_outline(
+                                mt, chosen_roles
+                            )
+                            st.session_state[merge_sync_key] = plan_i
                     default_outline = ""
                     if 0 <= plan_i < len(variants):
                         default_outline = str(variants[plan_i].get("outline") or "").strip()
-                    if default_outline and not (st.session_state.get(f"merge_preview_{idx}") or "").strip():
-                        from narrativeloom.utils.display_utils import format_functional_merged_outline
-
-                        st.session_state[f"merge_preview_{idx}"] = format_functional_merged_outline(
-                            default_outline, chosen_roles
-                        )
 
                     st.text_area(
                         T("assembly_slots_title", lg),
@@ -2028,7 +2084,9 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
             st.error(T("expand_err", lg))
         else:
             beat_objs = [st.session_state.beats[i] for i in range(n) if st.session_state.beats[i]]
-            full_canon = canon_sheet_from_beats(beat_objs, background_prefix=_body_canon_prefix())
+            full_canon = canon_sheet_from_beats(
+        beat_objs, background_prefix=_body_canon_prefix(lg), lang=lg
+    )
             all_chunks = build_chunks_from_beats(
                 [_beat_to_text(st.session_state.beats[i], lg) for i in range(n) if st.session_state.beats[i]]
             )

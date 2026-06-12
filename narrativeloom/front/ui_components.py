@@ -69,6 +69,11 @@ def render_lang_select(key: str = "ui_lang_select") -> None:
     st.markdown("</div>", unsafe_allow_html=True)
     if choice != st.session_state.ui_lang:
         st.session_state.ui_lang = choice
+        st.session_state.functional_candidates = {}
+        st.session_state.typified_candidates = []
+        st.session_state.typified_snapshot = {}
+        st.session_state.pop("_fc_beat_idx", None)
+        st.session_state.pop("_typ_beat_idx", None)
         st.rerun()
 
 
@@ -86,6 +91,11 @@ def render_landing_lang_corner(key: str = "ui_lang_select") -> None:
     )
     if choice != st.session_state.ui_lang:
         st.session_state.ui_lang = choice
+        st.session_state.functional_candidates = {}
+        st.session_state.typified_candidates = []
+        st.session_state.typified_snapshot = {}
+        st.session_state.pop("_fc_beat_idx", None)
+        st.session_state.pop("_typ_beat_idx", None)
         st.rerun()
 
 
@@ -802,7 +812,7 @@ def render_unified_plan_carousel(
             item = slice_[col_i]
             lab = labels[vi] if vi < len(labels) else str(vi + 1)
             outline = str(item.get("outline") or "").strip()
-            if renormalize_on_render and role_layout and outline and role_names:
+            if renormalize_on_render and outline:
                 outline = normalize_single_unified_outline(
                     outline,
                     role_names=role_names,

@@ -37,12 +37,19 @@ def build_chunks_from_beats(beat_texts: List[str], max_chunk_chars: int = 900) -
     return chunks
 
 
-def canon_sheet_from_beats(beats: List, *, background_prefix: str = "", global_cast_block: str = "") -> str:
+def canon_sheet_from_beats(
+    beats: List,
+    *,
+    background_prefix: str = "",
+    global_cast_block: str = "",
+    lang: str = "zh",
+) -> str:
     """从已选节拍汇总「设定清单」：人物与地点线索，强制模型沿用。可选前置背景纲要。"""
+    en = (lang or "zh") == "en"
     lines: List[str] = []
     bp = (background_prefix or "").strip()
     if bp:
-        lines.append("【创作背景（须遵守）】")
+        lines.append("【Creative background (must follow)】" if en else "【创作背景（须遵守）】")
         lines.append(bp[:4000])
         lines.append("")
     gcb = (global_cast_block or "").strip()
@@ -66,10 +73,18 @@ def canon_sheet_from_beats(beats: List, *, background_prefix: str = "", global_c
             if m:
                 names.append(m[:200])
     if names:
-        lines.append("【已定稿人物信息（后续必须沿用相同姓名与称谓，禁止改名或新增同角色别名）】")
+        lines.append(
+            "【Locked character info (reuse exact names and forms; no renames or duplicate aliases)】"
+            if en
+            else "【已定稿人物信息（后续必须沿用相同姓名与称谓，禁止改名或新增同角色别名）】"
+        )
         lines.extend(names)
     if locs:
-        lines.append("\n【已定稿地点/时空线索】")
+        lines.append(
+            "\n【Locked setting / spatiotemporal cues】"
+            if en
+            else "\n【已定稿地点/时空线索】"
+        )
         lines.extend(locs[:8])
     return "\n".join(lines)[:6000]
 

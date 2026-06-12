@@ -128,13 +128,108 @@ _PLACEHOLDER_CHARACTER_DESC = (
     "行动推动当前情节",
     "向导既定主角",
 )
+_PLACEHOLDER_CHARACTER_DESC_EN = (
+    "Main character of this section",
+    "drives the current plot",
+    "Key story character",
+    "key story figure",
+    "opposes this beat",
+    "opposed to the plot goal",
+    "who drives this beat",
+    "main character who drives",
+    "main character present in",
+)
+
+
+def _is_en_lang(lang: str) -> bool:
+    v = (lang or "zh").strip().lower()
+    return v in ("en", "english")
+
+
+def _name_desc_sep(lang: str) -> str:
+    return ": " if _is_en_lang(lang) else "："
+
+
+_FN_ZH_LABEL_TO_EN: Tuple[Tuple[str, str], ...] = (
+    ("地点", "Location"),
+    ("时间", "Time"),
+    ("场景", "Scene"),
+    ("规则", "Rules"),
+    ("核心矛盾", "Core conflict"),
+    ("核心冲突", "Core conflict"),
+    ("主要矛盾", "Core conflict"),
+    ("戏剧冲突", "Dramatic tension"),
+    ("戏剧高潮", "Dramatic climax"),
+    ("悬念升级", "Suspense"),
+    ("悬念节点", "Suspense"),
+    ("悬念", "Suspense"),
+    ("因果链", "Causal chain"),
+    ("关键突变", "Turning point"),
+    ("阻碍", "Obstacle"),
+    ("障碍", "Obstacle"),
+)
+
+_ZH_SNIPPET_TO_EN: Tuple[Tuple[str, str], ...] = (
+    ("本节主要人物，行动推动当前情节", "main character who drives this beat's plot"),
+    ("与本节剧情目标相对立", "opposes this beat's story goal"),
+    ("关键剧情人物", "key story figure"),
+    ("动机与性格须在本小节行动中体现", "motives shown through actions this beat"),
+    ("须在本节行动中有动机", "motivated actions this beat"),
+)
+
+
+def _scrub_zh_snippets_for_en(text: str) -> str:
+    out = text or ""
+    for zh, en in _ZH_SNIPPET_TO_EN:
+        out = out.replace(zh, en)
+    return out
+
+
+def localize_functional_outline(text: str, *, lang: str = "zh") -> str:
+    """英文模式下将功能化方案中的中文结构标签替换为英文标签。"""
+    if not _is_en_lang(lang) or not (text or "").strip():
+        return text or ""
+    out_lines: List[str] = []
+    for ln in (text or "").splitlines():
+        s = ln.rstrip()
+        if not s.strip():
+            out_lines.append(s)
+            continue
+        bullet = re.match(r"^([-•·]\s*)", s)
+        prefix = bullet.group(1) if bullet else ""
+        probe = s[len(prefix) :] if prefix else s
+        probe = probe.lstrip("-•· ").strip()
+        mapped = probe
+        for zh, en in _FN_ZH_LABEL_TO_EN:
+            if re.match(rf"^{re.escape(zh)}\s*[：:]", probe):
+                rest = re.sub(rf"^{re.escape(zh)}\s*[：:]\s*", "", probe, count=1)
+                rest = _scrub_zh_snippets_for_en(rest)
+                if rest in ("—", "-", "…", "..."):
+                    pass
+                elif _is_placeholder_character_desc(rest):
+                    if en == "Core conflict":
+                        rest = "opposes this beat's story goal"
+                    elif en == "Dramatic tension":
+                        rest = "—"
+                mapped = f"{en}: {rest}"
+                break
+        else:
+            mapped = _scrub_zh_snippets_for_en(probe)
+        if prefix:
+            out_lines.append(f"{prefix}{mapped}")
+        elif probe != mapped or re.match(r"^[-•·]\s*", s):
+            out_lines.append(f"- {mapped}")
+        else:
+            out_lines.append(mapped)
+    return _scrub_zh_snippets_for_en("\n".join(out_lines))
 
 
 def _is_placeholder_character_desc(desc: str) -> bool:
     d = (desc or "").strip()
     if not d or len(d) < 2:
         return True
-    return any(p in d for p in _PLACEHOLDER_CHARACTER_DESC)
+    phrases = _PLACEHOLDER_CHARACTER_DESC + _PLACEHOLDER_CHARACTER_DESC_EN
+    return any(p in d for p in phrases)
 
 
 def _location_hint(setting: str) -> str:
@@ -168,6 +263,7 @@ def _resolve_character_description(
     key_events: str = "",
     prior_profiles: Optional[Dict[str, str]] = None,
     raw_map: Optional[Dict[str, str]] = None,
+    lang: str = "zh",
 ) -> str:
     """为人物生成具体设定句，禁止占位/承接类无效描述。"""
     prior = lookup_character_profile(name, prior_profiles)
@@ -182,15 +278,46 @@ def _resolve_character_description(
                 if v and not _is_placeholder_character_desc(v):
                     return v
     ctx_plot = "\n".join(x for x in (seed, key_events) if x)
-    archetype = _setting_archetype_trait(name, setting, seed)
+    archetype = _setting_archetype_trait(name, setting, seed, lang=lang)
     if archetype:
         return archetype
-    inferred = _infer_sculptor_trait(name, ctx_plot, setting)
-    trait_desc = inferred.split("：", 1)[-1].strip() if "：" in inferred else inferred.strip()
+    inferred = _infer_sculptor_trait(name, ctx_plot, setting, lang=lang)
+    sep = _name_desc_sep(lang)
+    trait_desc = inferred.split(sep, 1)[-1].strip() if sep in inferred else inferred.strip()
+    if trait_desc.startswith("- "):
+        trait_desc = trait_desc[2:].strip()
     if trait_desc and not _is_placeholder_character_desc(trait_desc):
         return trait_desc
     blob = f"{seed}\n{setting}".strip()
     setting_hint = _plain_setting_hint(setting)
+    if _is_en_lang(lang):
+        if name in blob:
+            en_roles = (
+                "painter",
+                "artist",
+                "student",
+                "reporter",
+                "worker",
+                "merchant",
+                "guard",
+                "apprentice",
+                "scientist",
+                "companion",
+            )
+            for role in en_roles:
+                if re.search(rf"\b{role}\b", blob, re.I) and re.search(re.escape(name), blob, re.I):
+                    hint = setting_hint or "this beat's setting"
+                    return f"{role.capitalize()}, tied to {hint}"
+            for sent in re.split(r"[.!?;\n]", seed):
+                if name not in sent:
+                    continue
+                tail = re.split(re.escape(name), sent, maxsplit=1, flags=re.I)[-1].strip(" ,:;-")
+                if 2 <= len(tail) <= 80 and not _is_placeholder_character_desc(tail):
+                    return tail[:80]
+        if setting and len(setting.strip()) >= 6:
+            hint = _plain_setting_hint(setting) or setting[:40].strip()
+            return f"Main character present in {hint}"
+        return "Main character who drives this beat's plot"
     if name in blob:
         for role in ("画师", "画家", "流浪", "工人", "老板", "师傅", "学生", "记者", "管事", "看守"):
             if role in blob:
@@ -347,6 +474,7 @@ def sanitize_typified_characters(
     prior_characters_block: str = "",
     strict_narrative_allowlist: bool = False,
     max_characters: int = 14,
+    lang: str = "zh",
 ) -> str:
     """过滤 characters 中的非人物条目，补满目标人数（类型化/功能化共用）。"""
     from narrativeloom.domain.character_names import (
@@ -435,6 +563,7 @@ def sanitize_typified_characters(
             key_events=key_events,
             prior_profiles=prior_profiles,
             raw_map=raw_map,
+            lang=lang,
         )
         kept.append((n, resolved))
 
@@ -1917,8 +2046,24 @@ _DEFAULT_FN_ROLE_NAMES = (
     "Setting Architect",
     "Character Sculptor",
     "Plot Logician",
+    "Plot Logic Designer",
     "Conflict Designer",
 )
+
+
+def _is_plot_logic_title(title: str) -> bool:
+    t = _role_title_key(title)
+    return "剧情逻辑" in t or "Plot Logician" in t or "Plot Logic" in t
+
+
+def _is_setting_architect_title(title: str) -> bool:
+    t = _role_title_key(title)
+    return "设定构建" in t or "Setting Architect" in t or t == "Setting"
+
+
+def _is_conflict_designer_title(title: str) -> bool:
+    t = _role_title_key(title)
+    return "冲突设计" in t or "Conflict Designer" in t or t == "Conflict"
 
 
 def _known_role_names(role_names: Optional[List[str]] = None) -> List[str]:
@@ -1980,19 +2125,34 @@ def _find_section_body(staged: List[Tuple[str, str]], role_name: str) -> str:
     return ""
 
 
-def _fallback_section_body(role_name: str, staged: List[Tuple[str, str]]) -> str:
+def _fallback_section_body(
+    role_name: str,
+    staged: List[Tuple[str, str]],
+    *,
+    lang: str = "zh",
+) -> str:
     """缺失职能分块时的最小兜底内容。"""
-    plot = _find_section_body(staged, "剧情逻辑师") or _find_section_body(staged, "Plot Logician")
+    plot = (
+        _find_section_body(staged, "剧情逻辑师")
+        or _find_section_body(staged, "Plot Logic Designer")
+        or _find_section_body(staged, "Plot Logician")
+    )
     if "冲突" in role_name or "Conflict" in role_name:
         picked: List[str] = []
         for ln in (plot or "").splitlines():
             s = ln.strip().lstrip("-·•").strip()
-            if s and re.search(r"(矛盾|阻碍|冲突|张力|对抗|阻力|高潮|阻碍)", s):
+            if s and re.search(
+                r"(矛盾|阻碍|冲突|张力|对抗|阻力|高潮|conflict|tension|contradiction|suspense)",
+                s,
+                re.I,
+            ):
                 picked.append(s if s.startswith("-") else f"- {s}")
             if len(picked) >= 3:
                 break
         if picked:
             return "\n".join(picked)
+        if _is_en_lang(lang):
+            return "- Core conflict: opposes this beat's story goal\n- Dramatic tension: —"
         return "- 核心矛盾：与本节剧情目标相对立\n- 戏剧冲突：—"
     if "设定" in role_name or "Setting" in role_name:
         return "—"
@@ -2006,6 +2166,8 @@ def _fallback_section_body(role_name: str, staged: List[Tuple[str, str]]) -> str
 def _ordered_unified_sections(
     staged: List[Tuple[str, str]],
     role_names: Optional[List[str]],
+    *,
+    lang: str = "zh",
 ) -> List[Tuple[str, str]]:
     """按用户选中的职能顺序输出，并补全缺失分块。"""
     order = _known_role_names(role_names)
@@ -2018,7 +2180,7 @@ def _ordered_unified_sections(
             continue
         body = _find_section_body(staged, rn)
         if not (body or "").strip():
-            body = _fallback_section_body(rn, staged)
+            body = _fallback_section_body(rn, staged, lang=lang)
         out.append((f"【{rn}】", body))
     return out
 
@@ -2129,7 +2291,7 @@ def trim_section_body_leak(body: str) -> str:
         body = body[: m.start()].strip()
     plain = re.search(
         r"(?:^|\n)(?:[-•·]\s*)?(?:【)?(?:设定构建师|人物塑造师|剧情逻辑师|冲突设计师|"
-        r"Setting Architect|Character Sculptor|Plot Logician|Conflict Designer)(?:】)?\s*[：:]",
+        r"Setting Architect|Character Sculptor|Plot Logician|Plot Logic Designer|Conflict Designer)(?:】)?\s*[：:]",
         body,
     )
     if plain and plain.start() > 0:
@@ -2409,13 +2571,31 @@ def _sculptor_line_by_name(body: str) -> Dict[str, str]:
     return out
 
 
-def _setting_archetype_trait(name: str, setting_text: str, seed_text: str = "") -> str:
+def _setting_archetype_trait(name: str, setting_text: str, seed_text: str = "", *, lang: str = "zh") -> str:
     """按设定/种子语境为锁定主角推断一句具体身份（功能化补全用）。"""
     hint = _location_hint(setting_text) or (setting_text or "").strip()[:28]
     blob = f"{seed_text}\n{setting_text}".strip()
     if not blob:
         return ""
     idx = sum(ord(c) for c in name) % 4
+    if _is_en_lang(lang):
+        if re.search(r"(space station|orbit|zero.?gravity|quantum|brain.?machine|spacecraft)", blob, re.I):
+            roles = ("Station scientist", "Experiment lead", "Aerospace engineer", "Quantum researcher")
+            scene = hint or "station lab module"
+            return f"{roles[idx]}, advancing critical work in {scene}"
+        if re.search(r"(magic|enchant|fantasy|arcane|ritual|spell)", blob, re.I):
+            roles = ("Apprentice mage", "Realm guide", "Alchemist", "Guardian")
+            scene = hint or "a hidden realm"
+            return f"{roles[idx]}, pursuing a clue in {scene}"
+        if re.search(r"(oil field|refinery|oil city|drilling|petroleum)", blob, re.I):
+            loc = hint or "the oil town"
+            roles = ("Local guide", "Oil worker's kin", "Crystal mentor", "Field recorder")
+            return f"{roles[idx]} from {loc}, steeped in local lore"
+        if re.search(r"(memorial|retire|oral history|senior center)", blob, re.I):
+            return f"Visiting researcher recording stories at {hint or 'the memorial hall'}"
+        if re.search(r"(laboratory|campus|university|graduate|instrument)", blob, re.I):
+            return f"Young researcher pressing for answers in {hint or 'the lab'}"
+        return ""
     if re.search(r"(空间站|近地轨道|天穹|零重力|轨道站|航天|生物实验舱|脑机|量子)", blob):
         roles = ("驻站科学家", "实验主理人", "航天工程师", "量子研究员")
         scene = hint or "空间站实验舱"
@@ -2435,11 +2615,51 @@ def _setting_archetype_trait(name: str, setting_text: str, seed_text: str = "") 
     return ""
 
 
-def _infer_sculptor_trait(name: str, plot_text: str, setting_text: str = "") -> str:
+def _infer_sculptor_trait(name: str, plot_text: str, setting_text: str = "", *, lang: str = "zh") -> str:
     """从剧情/设定上下文推断一句短身份，禁止「本小节出场」类占位。"""
+    sep = _name_desc_sep(lang)
     ctx = f"{plot_text}\n{setting_text}".strip()
+    if _is_en_lang(lang):
+        if not ctx:
+            return f"- {name}{sep}key story figure"
+        en_roles = (
+            "painter",
+            "artist",
+            "student",
+            "reporter",
+            "scientist",
+            "engineer",
+            "teacher",
+            "professor",
+            "assistant",
+            "worker",
+            "merchant",
+            "guard",
+            "apprentice",
+            "researcher",
+            "visitor",
+            "companion",
+        )
+        for role in en_roles:
+            if re.search(
+                rf"{re.escape(name)}[^,\.\n]{{0,24}}{role}|{role}[^,\.\n]{{0,24}}{re.escape(name)}",
+                ctx,
+                re.I,
+            ):
+                return f"- {name}{sep}{role}"
+        for sent in re.split(r"[.!?\n]", ctx):
+            s = sent.strip().lstrip("-·•").strip()
+            if name not in s or len(s) <= len(name) + 1:
+                continue
+            tail = re.split(re.escape(name), s, maxsplit=1, flags=re.I)[-1].strip(" ,:;-")
+            if 3 <= len(tail) <= 120 and not _is_placeholder_character_desc(tail):
+                return f"- {name}{sep}{tail[:120]}"
+        archetype = _setting_archetype_trait(name, setting_text, plot_text, lang=lang)
+        if archetype:
+            return f"- {name}{sep}{archetype}"
+        return f"- {name}{sep}main character who drives this beat's plot"
     if not ctx:
-        return f"- {name}：关键剧情人物"
+        return f"- {name}{sep}关键剧情人物"
 
     role_words = (
         "导师",
@@ -2520,10 +2740,10 @@ def _infer_sculptor_trait(name: str, plot_text: str, setting_text: str = "") -> 
             plot,
         ):
             return f"- {name}：外来访客，初识本地"
-    archetype = _setting_archetype_trait(name, setting, plot_text)
+    archetype = _setting_archetype_trait(name, setting, plot_text, lang=lang)
     if archetype:
-        return f"- {name}：{archetype}"
-    return f"- {name}：本节主要人物，行动推动当前情节"
+        return f"- {name}{sep}{archetype}"
+    return f"- {name}{sep}本节主要人物，行动推动当前情节"
 
 
 def _sculptor_line_needs_rewrite(name: str, description: str) -> bool:
@@ -2548,6 +2768,7 @@ def _polish_sculptor_line(
     *,
     plot_text: str,
     setting_text: str = "",
+    lang: str = "zh",
 ) -> str:
     s = (line or "").strip()
     if not s:
@@ -2578,14 +2799,15 @@ def _polish_sculptor_line(
     )
     if not name_ok:
         return ""
+    sep = _name_desc_sep(lang)
     if _sculptor_line_needs_rewrite(name, rest):
-        return _infer_sculptor_trait(name, plot_text, setting_text)
-    return f"- {name}：{rest}"
+        return _infer_sculptor_trait(name, plot_text, setting_text, lang=lang)
+    return f"- {name}{sep}{rest}"
 
 
-def _brief_sculptor_line(name: str, plot_text: str, setting_text: str = "") -> str:
+def _brief_sculptor_line(name: str, plot_text: str, setting_text: str = "", *, lang: str = "zh") -> str:
     """为剧情中出场但缺设定行的人物生成一句短身份。"""
-    return _infer_sculptor_trait(name, plot_text, setting_text)
+    return _infer_sculptor_trait(name, plot_text, setting_text, lang=lang)
 
 
 def _plot_narrative_for_cast(sources: List[str]) -> str:
@@ -2610,14 +2832,16 @@ def complete_sculptor_body(
     sculpt_target: int = 2,
     seed: str = "",
     prior_character_profiles: Optional[Dict[str, str]] = None,
+    lang: str = "zh",
 ) -> str:
     plot = list(plot_sources or [])
     plot_blob = _plot_narrative_for_cast(plot)
     setting_blob = "\n".join(s for s in (setting_sources or []) if (s or "").strip())
+    sep = _name_desc_sep(lang)
     prior_block = ""
     if prior_character_profiles:
         prior_block = "\n".join(
-            f"- {k}：{v}"
+            f"- {k}{sep}{v}"
             for k, v in prior_character_profiles.items()
             if k and v and not _is_placeholder_character_desc(v)
         )
@@ -2631,13 +2855,16 @@ def complete_sculptor_body(
         prior_characters_block=prior_block,
         strict_narrative_allowlist=False,
         max_characters=14,
+        lang=lang,
     )
     polished: List[str] = []
     for line in (out or "").splitlines():
         s = line.strip()
         if not s:
             continue
-        line_out = _polish_sculptor_line(s, plot_text=plot_blob, setting_text=setting_blob)
+        line_out = _polish_sculptor_line(
+            s, plot_text=plot_blob, setting_text=setting_blob, lang=lang
+        )
         if not line_out:
             probe = s if s.startswith("-") else f"- {s}"
             m = _CHAR_NAME_LINE.match(probe)
@@ -2651,8 +2878,9 @@ def complete_sculptor_body(
                     setting=setting_blob,
                     key_events=plot_blob,
                     prior_profiles=prior_character_profiles,
+                    lang=lang,
                 )
-                line_out = f"- {raw_name}：{resolved}"
+                line_out = f"- {raw_name}{sep}{resolved}"
             else:
                 line_out = s if s.startswith("-") else f"- {s}"
         polished.append(line_out)
@@ -2693,8 +2921,10 @@ def _is_meta_character_label(name: str) -> bool:
     return False
 
 
-def format_setting_architect_body(body: str) -> str:
+def format_setting_architect_body(body: str, *, lang: str = "zh") -> str:
     """设定构建师：地点与时间分行展示。"""
+    loc_lab = "Location" if _is_en_lang(lang) else "地点"
+    time_lab = "Time" if _is_en_lang(lang) else "时间"
     out_lines: List[str] = []
     for ln in (body or "").splitlines():
         s = ln.strip()
@@ -2702,33 +2932,37 @@ def format_setting_architect_body(body: str) -> str:
             continue
         probe = re.sub(r"^[-•·]\s*", "", s)
         m = re.match(
-            r"^地点[：:]\s*(.+?)(?:[，,；;]\s*|\s+)时间[：:]\s*(.+)$",
+            rf"^(?:地点|Location)\s*[：:]\s*(.+?)(?:[，,；;]\s*|\s+)(?:时间|Time)\s*[：:]\s*(.+)$",
             probe,
+            re.I,
         )
         if m:
-            out_lines.append(f"- 地点：{m.group(1).strip().rstrip('，,；;')}")
-            out_lines.append(f"- 时间：{m.group(2).strip()}")
+            out_lines.append(f"- {loc_lab}: {m.group(1).strip().rstrip('，,；; ')}")
+            out_lines.append(f"- {time_lab}: {m.group(2).strip()}")
             continue
-        if probe.startswith("地点") and re.search(r"时间[：:]", probe):
-            loc_m = re.match(r"^地点[：:]\s*(.+)$", probe)
+        if re.match(r"^(?:地点|Location)\b", probe, re.I) and re.search(r"(?:时间|Time)\s*[：:]", probe, re.I):
+            loc_m = re.match(rf"^(?:地点|Location)\s*[：:]\s*(.+)$", probe, re.I)
             if loc_m:
                 rest = loc_m.group(1)
-                t_parts = re.split(r"[，,；;]\s*时间[：:]", rest, maxsplit=1)
+                t_parts = re.split(rf"[，,；;]\s*(?:时间|Time)\s*[：:]", rest, maxsplit=1, flags=re.I)
                 if len(t_parts) == 2:
-                    out_lines.append(f"- 地点：{t_parts[0].strip().rstrip('，,；;')}")
-                    out_lines.append(f"- 时间：{t_parts[1].strip()}")
+                    out_lines.append(f"- {loc_lab}: {t_parts[0].strip().rstrip('，,；; ')}")
+                    out_lines.append(f"- {time_lab}: {t_parts[1].strip()}")
                     continue
         out_lines.append(s if re.match(r"^[-•·]\s*", s) else f"- {probe}")
-    return "\n".join(out_lines)
+    body_out = "\n".join(out_lines)
+    return localize_functional_outline(body_out, lang=lang)
 
 
-def fn_outline_homogeneity_snippet(outline: str, *, max_chars: int = 220) -> str:
+def fn_outline_homogeneity_snippet(outline: str, *, max_chars: int = 220, lang: str = "zh") -> str:
     """提取已定方案摘要以抑制后续小节同质化。"""
     txt = normalize_outline_role_headers((outline or "").strip(), None)
     if not txt:
         return ""
     sections = parse_merge_role_sections(txt)
     bits: List[str] = []
+    sep = ": " if _is_en_lang(lang) else "："
+    joiner = "; " if _is_en_lang(lang) else "；"
     for title, body in sections:
         label = re.sub(r"^[【\[]|[】\]]", "", title).strip()
         if any(k in label for k in ("设定构建", "人物塑造", "冲突设计", "Setting", "Sculptor", "Conflict")):
@@ -2736,17 +2970,20 @@ def fn_outline_homogeneity_snippet(outline: str, *, max_chars: int = 220) -> str
                 ln.strip().lstrip("-·•") for ln in (body or "").splitlines() if ln.strip()
             )[:80]
             if one:
-                bits.append(f"{label}：{one}")
-    snip = "；".join(bits)
+                bits.append(f"{label}{sep}{one}")
+    snip = joiner.join(bits)
     return snip[:max_chars] if snip else txt.replace("\n", " ")[:max_chars]
 
 
-def build_fn_prior_homogeneity_digest(outlines: List[str]) -> str:
+def build_fn_prior_homogeneity_digest(outlines: List[str], *, lang: str = "zh") -> str:
     lines: List[str] = []
     for i, o in enumerate(outlines):
-        sn = fn_outline_homogeneity_snippet(o)
+        sn = fn_outline_homogeneity_snippet(o, lang=lang)
         if sn:
-            lines.append(f"- 小节{i + 1}：{sn}")
+            if _is_en_lang(lang):
+                lines.append(f"- Section {i + 1}: {sn}")
+            else:
+                lines.append(f"- 小节{i + 1}：{sn}")
     return "\n".join(lines)
 
 
@@ -2900,9 +3137,9 @@ def normalize_single_unified_outline(
         body = trim_section_body_leak(body)
         body = _strip_role_header_lines_from_body(body, role_names)
         staged.append((title, body))
-        if "剧情逻辑" in title or "Plot Logician" in title:
+        if _is_plot_logic_title(title):
             plot_sources.append(body)
-        elif "设定构建" in title or "Setting" in title:
+        elif _is_setting_architect_title(title):
             setting_sources.append(body)
         else:
             narrative_sources.append(body)
@@ -2913,8 +3150,7 @@ def normalize_single_unified_outline(
         b
         for t, b in staged
         if not _is_sculptor_section_title(t)
-        and "设定构建" not in t
-        and "Setting Architect" not in t
+        and not _is_setting_architect_title(t)
         and (b or "").strip()
     ]
     processed: List[Tuple[str, str]] = []
@@ -2930,24 +3166,25 @@ def normalize_single_unified_outline(
                 sculpt_target=sculpt_target,
                 seed=seed,
                 prior_character_profiles=prior_character_profiles,
+                lang=lang,
             )
             if beat_index > 0:
                 body = abbreviate_established_sections(
                     body, title=title, beat_index=beat_index, locked_names=locked
                 )
             body = condense_role_body(body, max_lines=sculpt_target, max_chars=120)
-        elif "设定构建" in title or "Setting" in title:
-            body = format_setting_architect_body(body)
+        elif _is_setting_architect_title(title):
+            body = format_setting_architect_body(body, lang=lang)
             body = abbreviate_established_sections(
                 body, title=title, beat_index=beat_index, locked_names=locked
             )
             body = condense_role_body(
                 body, max_lines=4, max_chars=setting_cap
             )
-        elif "剧情逻辑" in title or "Plot Logician" in title:
+        elif _is_plot_logic_title(title):
             body = expand_plot_conflict_bullets(body)
             body = condense_role_body(body, max_lines=5, max_chars=plot_cap)
-        elif "冲突设计" in title or "Conflict" in title:
+        elif _is_conflict_designer_title(title):
             body = strip_conflict_obstacle_lines(body)
             body = expand_plot_conflict_bullets(body, drop_obstacles=True)
             body = condense_role_body(body, max_lines=4, max_chars=plot_cap)
@@ -2956,8 +3193,8 @@ def normalize_single_unified_outline(
         else:
             body = condense_role_body(body, max_lines=3, max_chars=40)
         processed.append((title, scrub_functional_fragment(strip_mutation_markers(body))))
-    final = _ordered_unified_sections(processed, role_names)
-    return rebuild_merge_sections(final)
+    final = _ordered_unified_sections(processed, role_names, lang=lang)
+    return localize_functional_outline(rebuild_merge_sections(final), lang=lang)
 
 
 def parse_merge_role_sections(

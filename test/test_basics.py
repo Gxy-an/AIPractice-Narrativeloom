@@ -1017,3 +1017,60 @@ def test_canonicalize_to_locked_name():
     assert canonicalize_to_locked_name("Vinci", ["Da Vinci", "Peppa"]) == "Da Vinci"
     assert canonicalize_to_locked_name("Peppa", ["Da Vinci", "Peppa"]) == "Peppa"
 
+
+def test_localize_scrubs_zh_conflict_and_character_placeholders():
+    from narrativeloom.utils.display_utils import localize_functional_outline
+
+    raw = (
+        "- 核心矛盾：与本节剧情目标相对立\n"
+        "- 戏剧冲突：—\n"
+        "- Peppa: 本节主要人物，行动推动当前情节"
+    )
+    out = localize_functional_outline(raw, lang="en")
+    assert "核心矛盾" not in out
+    assert "本节主要人物" not in out
+    assert "Core conflict:" in out
+    assert "main character who drives this beat's plot" in out
+
+
+def test_localize_functional_outline_maps_zh_labels_to_en():
+    from narrativeloom.utils.display_utils import localize_functional_outline
+
+    raw = "- 地点：Milan pigsty\n- 核心冲突：art vs survival\n- 戏剧高潮：—"
+    out = localize_functional_outline(raw, lang="en")
+    assert "Location:" in out
+    assert "Core conflict:" in out
+    assert "Dramatic climax:" in out
+    assert "地点" not in out
+    assert "核心冲突" not in out
+
+
+def test_functional_en_outline_normalization_uses_english_fallbacks():
+    from narrativeloom.utils.display_utils import normalize_single_unified_outline
+
+    role_names = [
+        "Setting Architect",
+        "Character Sculptor",
+        "Plot Logic Designer",
+        "Conflict Designer",
+    ]
+    outline = (
+        "【Setting Architect】\n—\n"
+        "【Character Sculptor】\n"
+        "- Leonardo da Vinci: painted The Last Supper on a pigsty wall\n"
+        "- Peppa: 本节主要人物，行动推动当前情节\n"
+        "【Plot Logic Designer】\n—\n"
+        "【Conflict Designer】\n"
+    )
+    out = normalize_single_unified_outline(
+        outline,
+        role_names=role_names,
+        lang="en",
+        seed="Leonardo da Vinci paints with Peppa in a Milan pigsty",
+        locked_names=["Leonardo da Vinci", "Peppa"],
+    )
+    assert "本节主要人物" not in out
+    assert "核心矛盾" not in out
+    assert "Core conflict" in out
+    assert "Peppa" in out
+
