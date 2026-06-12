@@ -203,8 +203,8 @@ def _resolve_character_description(
             if name not in sent:
                 continue
             tail = sent.split(name, 1)[-1].strip("，,：: 在将向对")
-            if 2 <= len(tail) <= 26 and not _is_placeholder_character_desc(tail):
-                return tail[:26]
+            if 2 <= len(tail) <= 80 and not _is_placeholder_character_desc(tail):
+                return tail[:80]
     if setting and len(setting.strip()) >= 6:
         return f"本节主要人物，身处{_plain_setting_hint(setting) or setting[:22].rstrip('，,；; ')}"
     return "本节主要人物，行动推动当前情节"
@@ -288,14 +288,12 @@ def normalize_typified_key_events(
     *,
     min_lines: int = 3,
     max_lines: int = 5,
+    lang: str = "zh",
 ) -> str:
-    """规范类型化核心事件：单句 30～50 字/条，小节总和 ≤300 字。"""
-    from narrativeloom.service.llm_client import (
-        TYPIFIED_KEY_EVENT_CHARS_MAX,
-        TYPIFIED_KEY_EVENT_CHARS_MIN,
-        TYPIFIED_KEY_EVENTS_TOTAL_MAX,
-    )
+    """规范类型化核心事件：中文按字计；英文按更长字符预算并在词边界截断。"""
+    from narrativeloom.service.llm_client import typified_key_event_char_limits
 
+    char_min, char_max, total_max = typified_key_event_char_limits(lang)
     raw = coerce_display_text(text).strip()
     if not raw:
         return raw
@@ -304,15 +302,15 @@ def normalize_typified_key_events(
         e = re.sub(r"^[-*•·]\s*", "", entry.strip())
         if not e or not key_events_meaningful(e):
             continue
-        if len(e) > TYPIFIED_KEY_EVENT_CHARS_MAX:
-            e = e[:TYPIFIED_KEY_EVENT_CHARS_MAX]
+        if len(e) > char_max:
+            e = _truncate_text_at_word(e, char_max) if lang == "en" else e[:char_max]
         entries.append(e)
     out: List[str] = []
     total = 0
     for e in entries:
         if len(out) >= max_lines:
             break
-        if out and total + len(e) > TYPIFIED_KEY_EVENTS_TOTAL_MAX:
+        if out and total + len(e) > total_max:
             break
         out.append(e)
         total += len(e)
@@ -320,11 +318,22 @@ def normalize_typified_key_events(
         return raw
     while len(out) < min_lines and len(entries) > len(out):
         nxt = entries[len(out)]
-        if total + len(nxt) > TYPIFIED_KEY_EVENTS_TOTAL_MAX:
+        if total + len(nxt) > total_max:
             break
         out.append(nxt)
         total += len(nxt)
     return "\n".join(f"- {e}" for e in out)
+
+
+def _truncate_text_at_word(text: str, max_len: int) -> str:
+    """英文文本在词边界截断，避免 mid-word 残片。"""
+    s = (text or "").strip()
+    if len(s) <= max_len:
+        return s
+    cut = s[:max_len]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.rstrip(".,;:-") if len(cut) >= max_len // 3 else s[:max_len].rstrip(".,;:-")
 
 
 def sanitize_typified_characters(
@@ -349,6 +358,7 @@ def sanitize_typified_characters(
         _resolve_cast_name,
         _scrub_cast_name,
         _valid_sculptor_entry,
+        canonicalize_to_locked_name,
         is_false_person_name,
         merge_unique_names,
     )
@@ -386,9 +396,10 @@ def sanitize_typified_characters(
             for lk in locked
         )
         if is_locked:
-            n = raw_name
+            n = canonicalize_to_locked_name(raw_name, locked) or raw_name
         else:
             n = _scrub_cast_name(name, cast_so_far, context=f"{desc}\n{context}")
+            n = canonicalize_to_locked_name(n, locked) or n
         if not n or n in seen:
             return
         if _is_subname_of_compound_cast(n, locked + cast_so_far) and not is_locked:
@@ -531,6 +542,14 @@ def _normalize_char_entry(s: str) -> str:
     if "：" in s:
         name, _, desc = s.partition("：")
         name, desc = name.strip(), desc.strip()
+        if re.match(r"^'s\b", desc):
+            name = f"{name}'s"
+            desc = desc[2:].lstrip()
+        elif desc.startswith("'") and len(name) >= 2 and not name.endswith("'s"):
+            m = re.match(r"^'([a-z]{1,4})\b", desc)
+            if m and m.group(1) in ("s", "re", "ve", "ll", "d", "m"):
+                name = f"{name}'{m.group(1)}"
+                desc = desc[m.end() :].lstrip()
         max_name = 32 if re.search(r"[A-Za-z]", name) else 12
         if 1 < len(name) <= max_name and len(desc) >= 2:
             return f"{name}：{desc}"

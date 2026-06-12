@@ -814,6 +814,26 @@ def extract_cast_from_narrative(text: str, *, limit: int = 8) -> List[str]:
     return out
 
 
+def canonicalize_to_locked_name(name: str, locked: Optional[List[str]] = None) -> str:
+    """将简称/别名对齐到锁定全名（如 Vinci → Da Vinci）。"""
+    n = (name or "").strip()
+    if not n or not locked:
+        return n
+    if n in locked:
+        return n
+    best = ""
+    for lk in locked:
+        if not lk:
+            continue
+        if lk == n or lk.startswith(n) or n.startswith(lk):
+            if len(lk) >= len(best):
+                best = lk
+        parts = [p for p in re.split(r"[\s·．\.]+", lk) if p]
+        if n in parts and len(lk) >= len(best):
+            best = lk
+    return best or n
+
+
 def filter_valid_cast_names(
     names: List[str],
     *,
@@ -828,7 +848,11 @@ def filter_valid_cast_names(
         n = (raw or "").strip()
         if not n or n in seen:
             continue
-        if n in keep or _is_compound_cast_name(n) or _is_seed_cast_name(n, context=context or n):
+        if n in keep:
+            out.append(n)
+            seen.add(n)
+            continue
+        if _is_compound_cast_name(n) or _is_seed_cast_name(n, context=context or n):
             out.append(n)
             seen.add(n)
             continue

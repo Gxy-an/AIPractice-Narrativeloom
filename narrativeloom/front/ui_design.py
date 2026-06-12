@@ -405,8 +405,9 @@ div.nl-landing-lang-anchor + div[data-testid="stSelectbox"] label {{
 }}
 .nl-typ-as-fn .nl-fn-module-body,
 .nl-typ-as-fn .nl-typ-fn-body {{
-    max-height: 15.75rem;
-    min-height: 10.5rem;
+    max-height: 28rem;
+    min-height: 12rem;
+    overflow-y: auto;
 }}
 .nl-fn-module-body-tall {{
     max-height: 30rem;

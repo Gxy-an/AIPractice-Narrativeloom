@@ -48,6 +48,9 @@ load_dotenv(PROJECT_ROOT / ".env")
 TYPIFIED_KEY_EVENT_CHARS_MIN = 30
 TYPIFIED_KEY_EVENT_CHARS_MAX = 50
 TYPIFIED_KEY_EVENTS_TOTAL_MAX = 300
+TYPIFIED_KEY_EVENT_CHARS_MIN_EN = 40
+TYPIFIED_KEY_EVENT_CHARS_MAX_EN = 160
+TYPIFIED_KEY_EVENTS_TOTAL_MAX_EN = 640
 PROSE_CHARS_PER_SECTION_MIN = 800
 PROSE_CHARS_PER_SECTION_MAX = 1000
 
@@ -70,6 +73,17 @@ def _clamp_section_count(num_sections: int) -> int:
 def _prose_length_budget(num_sections: int) -> tuple[int, int]:
     n = _clamp_section_count(num_sections)
     return n * PROSE_CHARS_PER_SECTION_MIN, n * PROSE_CHARS_PER_SECTION_MAX
+
+
+def typified_key_event_char_limits(lang: str) -> tuple[int, int, int]:
+    """Return per-line min/max char caps and total budget for normalize_typified_key_events."""
+    if (lang or "zh") == "en":
+        return (
+            TYPIFIED_KEY_EVENT_CHARS_MIN_EN,
+            TYPIFIED_KEY_EVENT_CHARS_MAX_EN,
+            TYPIFIED_KEY_EVENTS_TOTAL_MAX_EN,
+        )
+    return TYPIFIED_KEY_EVENT_CHARS_MIN, TYPIFIED_KEY_EVENT_CHARS_MAX, TYPIFIED_KEY_EVENTS_TOTAL_MAX
 
 
 def _arc_key_events_range(beat_idx: int, num_sections: int) -> tuple[int, int]:
@@ -842,10 +856,13 @@ def generate_typified_beat(
     beat_index: int = 0,
     num_sections: int = 6,
     character_target_total: Optional[int] = None,
+    preset_protagonist_names: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     cfg = _cfg_or_env(llm_cfg)
+    preset = merge_unique_names([n.strip() for n in (preset_protagonist_names or []) if (n or "").strip()])
     locked = merge_unique_names(
         [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
+        preset,
         extract_seed_cast_names(seed),
     )
     locked_txt = ", ".join(locked) if locked and lang == "en" else ("、".join(locked) if locked else "")
@@ -933,6 +950,11 @@ def generate_typified_beat(
             )
         if locked_txt:
             user += f"\nLOCKED NAMES (must ALL appear in characters, unchanged spelling): {locked_txt}\n"
+        if preset:
+            user += (
+                f"\nWIZARD PRESET PROTAGONISTS (must appear in EVERY section, exact spelling): "
+                f"{', '.join(preset)}\n"
+            )
         seed_cast = extract_seed_cast_names(seed)
         if seed_cast:
             user += (
@@ -1005,6 +1027,8 @@ def generate_typified_beat(
             )
         if locked_txt:
             user += f"\n【锁定姓名（characters 中必须全部出现，拼写不变）】{locked_txt}\n"
+        if preset:
+            user += f"\n【向导预设主角（各小节必须全部出现，拼写不变）】{'、'.join(preset)}\n"
         seed_cast = extract_seed_cast_names(seed)
         if seed_cast:
             if lang == "en":
@@ -1062,6 +1086,7 @@ def generate_typified_beat(
         data.get("key_events", ""),
         min_lines=ke_min,
         max_lines=ke_max,
+        lang=lang,
     )
     if not typified_characters_meaningful(data.get("characters")):
         ch_bf = _backfill_typified_characters(

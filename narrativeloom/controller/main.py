@@ -312,7 +312,11 @@ def _locked_character_names(beat_idx: int, lg: str) -> List[str]:
                 )
     merged = merge_unique_character_names(*lists)
     ctx = f"{seed}\n{bg}"
-    return filter_valid_cast_names(merged, preserve=list(preset), context=ctx)
+    filtered = filter_valid_cast_names(merged, preserve=list(preset), context=ctx)
+    for p in preset:
+        if p and p not in filtered:
+            filtered.insert(0, p)
+    return filtered
 
 
 def _prior_beat_char_target(beat_idx: int, pool: str) -> int:
@@ -681,6 +685,7 @@ def _parallel_typified(
     title, hint = labels[beat_idx]
     prior = _prior_summary(beat_idx, labels, lang)
     locked_chars = _locked_character_names(beat_idx, lang)
+    preset = list(st.session_state.get("preset_protagonist_names") or [])
     prior_chars = _prior_characters_block(beat_idx, labels, lang) if beat_idx > 0 else ""
     if char_target is None:
         char_target = max(_resolve_typified_char_target(beat_idx, lang), len(locked_chars), 2)
@@ -716,6 +721,7 @@ def _parallel_typified(
                     beat_index=beat_idx,
                     num_sections=len(labels),
                     character_target_total=char_target,
+                    preset_protagonist_names=preset,
                 )
             except Exception as e:  # noqa: BLE001
                 last_err = e

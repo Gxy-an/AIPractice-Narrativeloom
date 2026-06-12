@@ -562,7 +562,7 @@ def test_normalize_typified_key_events_respects_length_and_total_cap():
     from narrativeloom.utils.display_utils import normalize_typified_key_events
 
     events = "\n".join(f"- 事件条目{i}，" + "甲" * 35 for i in range(1, 7))
-    out = normalize_typified_key_events(events, min_lines=3, max_lines=5)
+    out = normalize_typified_key_events(events, min_lines=3, max_lines=5, lang="zh")
     lines = [ln.lstrip("-·• ").strip() for ln in out.splitlines() if ln.strip()]
     assert 3 <= len(lines) <= 5
     assert all(30 <= len(ln) <= 50 for ln in lines)
@@ -988,4 +988,32 @@ def test_extract_english_names_from_narrative():
     assert "Kaelen" in names
     assert "Peppa" in names
     assert "Zura" in names
+
+
+def test_normalize_typified_key_events_english_allows_longer_lines():
+    from narrativeloom.utils.display_utils import normalize_typified_key_events
+
+    long_line = (
+        "- Da Vinci hurls a bucket of limewash at the attackers while Peppa bolts through the mud-slicked pigsty"
+    )
+    out = normalize_typified_key_events(long_line, min_lines=1, max_lines=3, lang="en")
+    line = out.lstrip("-·• ").strip()
+    assert len(line) > 50
+    assert not line.endswith("bur")
+    assert "limewash" in line or "attackers" in line
+
+
+def test_normalize_char_entry_repairs_possessive_split():
+    from narrativeloom.utils.display_utils import _normalize_char_entry
+
+    fixed = _normalize_char_entry("Knight: 's curse on the fresco")
+    assert fixed.startswith("Knight's")
+    assert "curse" in fixed
+
+
+def test_canonicalize_to_locked_name():
+    from narrativeloom.domain.character_names import canonicalize_to_locked_name
+
+    assert canonicalize_to_locked_name("Vinci", ["Da Vinci", "Peppa"]) == "Da Vinci"
+    assert canonicalize_to_locked_name("Peppa", ["Da Vinci", "Peppa"]) == "Peppa"
 
