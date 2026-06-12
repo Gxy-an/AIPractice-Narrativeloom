@@ -352,7 +352,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "wiz_char_total_label": "Initial main cast size",
         "wiz_char_total_help": "Target count at story opening; later beats get higher suggestions as the plot develops.",
         "wiz_protagonists_label": "Protagonist names (optional)",
-        "wiz_protagonists_ph": "e.g. Da Vinci · Gousheng, Cuihua (顿号 separated)",
+        "wiz_protagonists_ph": "e.g. Peppa, Kaelen, Zura (comma-separated)",
         "wiz_protagonists_help": "Lock protagonist names before generation; leave blank to infer from the sparkles text.",
         "typ_regen_plans": "Regenerate for character count",
         "fn_char_none": "(none yet)",

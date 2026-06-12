@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, TypedDict
+from typing import Any, Dict, List, Tuple, TypedDict
 
 
 class ConsentMeta(TypedDict):
@@ -107,3 +107,122 @@ CONSENT_STATEMENTS: List[str] = [
     "我同意研究团队收集和使用我的匿名实验数据用于学术研究。",
     "我了解我可以随时退出实验，且不会受到任何不利影响。",
 ]
+
+CONSENT_META_EN: ConsentMeta = {
+    "title": "Informed Consent — Human–AI Collaborative Storytelling Study",
+    "chips": ["~40 minutes", "25 participants", "Peking University", "CHI 2026 research"],
+}
+
+CONSENT_SECTIONS_EN: List[Dict[str, Any]] = [
+    {
+        "title": "1. Study information",
+        "kind": "kv",
+        "rows": [
+            (
+                "Project title",
+                "Effects of persona functional differentiation on creative diversity and narrative coherence in human–AI collaborative storytelling",
+            ),
+            ("Principal investigator", "Xinyue Gu"),
+            ("Institution", "College of Chemistry and Molecular Engineering, Peking University"),
+            ("Contact email", "2400011707@stu.pku.edu.cn"),
+            ("Target enrollment", "25 participants"),
+            ("Session length", "About 40 minutes"),
+        ],
+    },
+    {
+        "title": "2. Purpose and background",
+        "kind": "text",
+        "paragraphs": [
+            "This study is based on the CHI 2026 paper "
+            "“NarrativeLoom: Enhancing Creative Storytelling through Multi-Persona Collaborative Improvisation” "
+            "(arXiv:2603.07155v1). We compare typified-persona and functional-persona AI collaboration modes "
+            "and how they affect human storytelling experience and story quality.",
+            "Your participation will help us design more effective and creative AI writing assistants "
+            "and inform future human–AI co-creation systems.",
+        ],
+    },
+    {
+        "title": "3. Procedure",
+        "kind": "steps",
+        "steps": [
+            {
+                "label": "Consent & demographics",
+                "time": "~3 min",
+                "desc": "Read this form and provide anonymous background information.",
+            },
+            {
+                "label": "Tutorial & task briefing",
+                "time": "~2 min",
+                "desc": "Review a short system walkthrough and the storytelling task.",
+            },
+            {
+                "label": "Human–AI story creation",
+                "time": "~30 min",
+                "desc": "Try both AI collaboration modes and complete at least two story beats from a sparkles prompt; you may select and edit AI output freely.",
+            },
+            {
+                "label": "Post-task questionnaire",
+                "time": "~5 min",
+                "desc": "Answer questions about creativity, experience, and usability.",
+            },
+            {"label": "End of session", "time": "", "desc": "Submit the questionnaire to receive compensation."},
+        ],
+    },
+    {
+        "title": "4. Potential risks",
+        "kind": "bullets",
+        "intro": "This is a minimal-risk study with no physical harm:",
+        "items": [
+            "You may experience mild cognitive fatigue similar to everyday writing;",
+            "No sensitive personal information will be collected;",
+            "Story content you create will be fully anonymized and not linked to your identity.",
+        ],
+    },
+    {
+        "title": "5. Potential benefits",
+        "kind": "bullets",
+        "items": [
+            "Personal: CNY 0 cash compensation after completing the full session (paid within 24 hours).",
+            "Scientific: Your data supports research on human–AI creative collaboration.",
+            "Experiential: You will try an AI storytelling system based on recent HCI research.",
+        ],
+    },
+    {
+        "title": "6. Privacy and confidentiality",
+        "kind": "bullets",
+        "intro": "We follow academic ethics standards and protect your privacy:",
+        "items": [
+            "Full anonymity: data are labeled with random IDs; no directly identifying information is collected.",
+            "Encrypted storage: data are stored on encrypted servers accessible only to the research team.",
+            "Use: data are used only for academic analysis, not for commercial purposes.",
+            "Retention: raw data are kept for one year after publication, then permanently deleted.",
+            "Sharing: publications will report aggregated statistics only, never individual drafts or answers.",
+        ],
+    },
+    {
+        "title": "7. Your rights",
+        "kind": "bullets",
+        "items": [
+            "Voluntary participation: you may decline before starting, without giving a reason.",
+            "Withdraw anytime: you may stop during the session without penalty for completed portions.",
+            "Data control: within 7 days after the session you may request deletion via the contact email.",
+            "Information: you may ask questions before, during, or after the study.",
+            "Compensation: participants who take part receive the compensation described above.",
+        ],
+    },
+]
+
+CONSENT_STATEMENTS_EN: List[str] = [
+    "I have read and fully understand this informed consent form.",
+    "I confirm that I am at least 18 years old and legally competent to consent.",
+    "I voluntarily participate in this study and understand my rights and obligations.",
+    "I agree that the research team may collect and use my anonymized experimental data for academic research.",
+    "I understand that I may withdraw at any time without adverse consequences.",
+]
+
+
+def get_consent_bundle(lang: str) -> Tuple[ConsentMeta, List[Dict[str, Any]], List[str]]:
+    """Return consent meta, sections, and checkbox statements for the UI language."""
+    if (lang or "zh") == "en":
+        return CONSENT_META_EN, CONSENT_SECTIONS_EN, CONSENT_STATEMENTS_EN
+    return CONSENT_META, CONSENT_SECTIONS, CONSENT_STATEMENTS

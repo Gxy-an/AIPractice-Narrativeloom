@@ -531,7 +531,8 @@ def _normalize_char_entry(s: str) -> str:
     if "：" in s:
         name, _, desc = s.partition("：")
         name, desc = name.strip(), desc.strip()
-        if 1 < len(name) <= 12 and len(desc) >= 2:
+        max_name = 32 if re.search(r"[A-Za-z]", name) else 12
+        if 1 < len(name) <= max_name and len(desc) >= 2:
             return f"{name}：{desc}"
         if len(desc) >= 2:
             return f"{name}：{desc}" if name else desc
@@ -552,19 +553,19 @@ def _split_character_entries(characters: str) -> List[str]:
             lines.append(_normalize_char_entry(ln))
     lines = [x for x in lines if x]
     if len(lines) >= 2:
-        return lines[:5]
+        return lines[:14]
 
     if "&" in raw:
         parts = [_normalize_char_entry(p) for p in raw.split("&")]
         parts = [p for p in parts if p]
         if len(parts) >= 2:
-            return parts[:5]
+            return parts[:14]
 
     if re.search(r"\s+-\s+", raw):
         parts = [_normalize_char_entry(p) for p in re.split(r"\s+-\s+", raw)]
         parts = [p for p in parts if p]
         if len(parts) >= 2:
-            return parts[:5]
+            return parts[:14]
 
     one = _normalize_char_entry(_strip_paren_notes(raw))
     return [one] if one else []
@@ -639,13 +640,14 @@ def _is_continuity_section_title(title: str) -> bool:
     return "连贯性校验" in t or "Continuity Checker" in t or t in ("【连贯性校验师】", "【Continuity Checker】")
 
 
-def _card_char_display(entry: str, *, max_chars: int = 88) -> str:
-    """卡片展示：与编辑区一致，保留完整人物行（仅做空白与 bullet 规整）。"""
+def _card_char_display(entry: str, *, max_chars: int = 0) -> str:
+    """卡片展示：保留完整人物行（仅做空白与 bullet 规整）。"""
     s = (entry or "").strip().lstrip("-·• ").strip()
     if not s:
         return ""
-    if len(s) > max_chars:
-        return s[:max_chars]
+    if max_chars and len(s) > max_chars:
+        cut = s[:max_chars].rsplit(" ", 1)[0] if " " in s[:max_chars] else s[:max_chars]
+        return cut.rstrip(".,;:-") + "…"
     return s
 
 
@@ -656,11 +658,10 @@ def format_typified_brief(data: dict, lang: str = "zh") -> Tuple[str, str, str]:
     events = coerce_display_text(data.get("key_events", ""))
     zh = (lang or "zh") == "zh"
     dash = "—" if zh else "—"
-    max_char = 88 if zh else 120
 
     place_line = _strip_paren_notes(setting.replace("\n", " ")).strip() or dash
 
-    char_entries = [_card_char_display(e, max_chars=max_char) for e in _split_character_entries(characters)]
+    char_entries = [_card_char_display(e) for e in _split_character_entries(characters)]
     char_entries = [e for e in char_entries if e and e not in _KEY_EVENTS_TRIVIAL]
     char_block = "\n".join(f"· {e}" for e in char_entries) if char_entries else dash
 
@@ -1127,7 +1128,7 @@ def scrub_expanded_prose_artifacts(text: str) -> str:
 _COPULA_STUCK_ON_NAME = frozenset("是为乃")
 _NAME_TRAILING_PARTICLE = frozenset("带进往向到见于的")
 _CHAR_NAME_LINE = re.compile(
-    r"^[-\s]*([^\s：:\d【】\[\]（）()]{2,12})[：:]",
+    r"^[-\s]*([^\s：:\d【】\[\]（）()]{2,32})[：:]",
     re.MULTILINE,
 )
 _COLON_SPLIT_NAME_SUFFIX = frozenset("丽古娜莎江木提尔克")
@@ -2231,6 +2232,72 @@ def _coalesce_person_names(names: List[str]) -> List[str]:
     return kept
 
 
+_EN_NARRATIVE_NAME_VERBS = (
+    "uses",
+    "reveals",
+    "plants",
+    "confronts",
+    "shows",
+    "tells",
+    "says",
+    "watches",
+    "leads",
+    "guides",
+    "helps",
+    "appears",
+    "enters",
+    "finds",
+    "grabs",
+    "throws",
+    "opens",
+    "closes",
+    "runs",
+    "walks",
+    "stops",
+    "asks",
+    "whispers",
+    "shouts",
+    "decides",
+    "realizes",
+    "discovers",
+    "warns",
+    "threatens",
+    "promises",
+    "refuses",
+    "plants",
+    "installs",
+    "activates",
+    "terminates",
+)
+
+
+def extract_english_names_from_narrative(text: str, *, limit: int = 8) -> List[str]:
+    """从英文剧情/人物行提取拉丁字母姓名。"""
+    from narrativeloom.domain.character_names import _is_latin_person_name
+
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    found: List[str] = []
+    verb_pat = "|".join(_EN_NARRATIVE_NAME_VERBS)
+    patterns = [
+        rf"\b([A-Z][a-z]{{2,15}})\s+(?:{verb_pat})\b",
+        rf"\b([A-Z][a-z]{{2,15}})'s\b",
+        r"^[-\s]*([A-Za-z][A-Za-z'\-\. ]{1,28}[A-Za-z]?)\s*[：:]",
+        r"(?:with|and|meet(?:s|ing)?|join(?:s|ed|ing)?)\s+([A-Z][a-z]{{2,15}})\b",
+    ]
+    for pat in patterns:
+        for m in re.finditer(pat, raw, re.MULTILINE | re.IGNORECASE):
+            n = (m.group(1) or "").strip()
+            if _is_latin_person_name(n) and n not in found:
+                found.append(n)
+            if len(found) >= limit:
+                break
+        if len(found) >= limit:
+            break
+    return found[:limit]
+
+
 def extract_names_from_narrative(text: str, *, limit: int = 6) -> List[str]:
     """从剧情叙述句中启发式提取人物姓名。"""
     raw = (text or "").strip()
@@ -2295,6 +2362,10 @@ def extract_names_from_narrative(text: str, *, limit: int = 6) -> List[str]:
         if len(found) >= limit:
             break
     for n in extract_relation_names(raw):
+        _keep(n, found)
+        if len(found) >= limit:
+            break
+    for n in extract_english_names_from_narrative(raw, limit=limit):
         _keep(n, found)
         if len(found) >= limit:
             break

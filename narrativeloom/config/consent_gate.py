@@ -6,9 +6,11 @@ from __future__ import annotations
 import html
 from typing import Any, Dict, List
 
+from functools import partial
+
 import streamlit as st
 
-from narrativeloom.config.consent_content import CONSENT_META, CONSENT_SECTIONS, CONSENT_STATEMENTS
+from narrativeloom.config.consent_content import get_consent_bundle
 from narrativeloom.config.i18n import T
 from narrativeloom.front.ui_components import inject_css, render_landing_lang_corner
 
@@ -30,9 +32,9 @@ def _render_steps(lg: str) -> str:
     return f'<div class="nl-consent-steps">{"".join(parts)}</div>'
 
 
-def _render_hero(lg: str) -> str:
-    title = CONSENT_META["title"]
-    chips = "".join(f'<span class="nl-consent-chip">{html.escape(c)}</span>' for c in CONSENT_META["chips"])
+def _render_hero(lg: str, meta: Dict[str, Any]) -> str:
+    title = meta["title"]
+    chips = "".join(f'<span class="nl-consent-chip">{html.escape(c)}</span>' for c in meta["chips"])
     return f"""
 <div class="nl-consent-hero">
   <h1>{html.escape(title)}</h1>
@@ -91,18 +93,18 @@ def _render_sections_html(sections: List[Dict[str, Any]]) -> str:
     return f'<div class="nl-consent-scroll">{inner}</div>'
 
 
-def _set_all_consent(checked: bool) -> None:
-    for i in range(len(CONSENT_STATEMENTS)):
+def _set_all_consent(checked: bool, n_statements: int) -> None:
+    for i in range(n_statements):
         st.session_state[f"consent_ck_{i}"] = checked
 
 
-def _on_consent_check_all() -> None:
-    _set_all_consent(bool(st.session_state.get("consent_ck_all")))
+def _on_consent_check_all(n_statements: int) -> None:
+    _set_all_consent(bool(st.session_state.get("consent_ck_all")), n_statements)
 
 
-def _on_consent_item_change() -> None:
+def _on_consent_item_change(n_statements: int) -> None:
     st.session_state["consent_ck_all"] = all(
-        st.session_state.get(f"consent_ck_{i}", False) for i in range(len(CONSENT_STATEMENTS))
+        st.session_state.get(f"consent_ck_{i}", False) for i in range(n_statements)
     )
 
 
@@ -112,6 +114,7 @@ def render_consent_gate() -> None:
         return
 
     lg = _lang()
+    meta, sections, statements = get_consent_bundle(lg)
     inject_css("landing")
     render_landing_lang_corner("consent_ui_lang")
 
@@ -119,8 +122,8 @@ def render_consent_gate() -> None:
     with col:
         st.markdown('<div class="nl-consent-page">', unsafe_allow_html=True)
         st.markdown(_render_steps(lg), unsafe_allow_html=True)
-        st.markdown(_render_hero(lg), unsafe_allow_html=True)
-        st.markdown(_render_sections_html(CONSENT_SECTIONS), unsafe_allow_html=True)
+        st.markdown(_render_hero(lg, meta), unsafe_allow_html=True)
+        st.markdown(_render_sections_html(sections), unsafe_allow_html=True)
 
         st.markdown(
             f"""
@@ -135,28 +138,33 @@ def render_consent_gate() -> None:
         if "consent_ck_all" not in st.session_state:
             st.session_state.consent_ck_all = False
 
+        n_statements = len(statements)
         all_checked = True
-        for i, label in enumerate(CONSENT_STATEMENTS):
+        for i, label in enumerate(statements):
             key = f"consent_ck_{i}"
             if key not in st.session_state:
                 st.session_state[key] = False
-            if not st.checkbox(label, key=key, on_change=_on_consent_item_change):
+            if not st.checkbox(
+                label,
+                key=key,
+                on_change=partial(_on_consent_item_change, n_statements),
+            ):
                 all_checked = False
 
         st.markdown('<div class="nl-consent-check-all">', unsafe_allow_html=True)
         st.checkbox(
             T("consent_check_all", lg),
             key="consent_ck_all",
-            on_change=_on_consent_check_all,
+            on_change=partial(_on_consent_check_all, n_statements),
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
         all_checked = all(
-            st.session_state.get(f"consent_ck_{i}", False) for i in range(len(CONSENT_STATEMENTS))
+            st.session_state.get(f"consent_ck_{i}", False) for i in range(n_statements)
         )
 
         if st.button(T("consent_submit", lg), type="primary", use_container_width=True, key="consent_submit_btn"):
-            if CONSENT_STATEMENTS and all_checked:
+            if statements and all_checked:
                 st.session_state.informed_consent_accepted = True
                 st.rerun()
             else:

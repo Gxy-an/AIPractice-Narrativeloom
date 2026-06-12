@@ -931,3 +931,61 @@ def test_filter_valid_cast_names_preserves_preset():
     assert "腰挂水囊" not in names
     assert "绳索" not in names
 
+
+def test_parse_preset_protagonist_names_english():
+    from narrativeloom.domain.character_names import parse_preset_protagonist_names
+
+    assert parse_preset_protagonist_names("Peppa, Kaelen, Zura") == ["Peppa", "Kaelen", "Zura"]
+    assert parse_preset_protagonist_names("Da Vinci, Peppa") == ["Da Vinci", "Peppa"]
+
+
+def test_get_consent_bundle_english():
+    from narrativeloom.config.consent_content import get_consent_bundle
+
+    meta, sections, statements = get_consent_bundle("en")
+    assert "Informed Consent" in meta["title"]
+    assert sections[0]["title"].startswith("1.")
+    assert len(statements) >= 5
+    assert all("I " in s or "I'" in s for s in statements)
+
+
+def test_split_character_entries_keeps_more_than_five():
+    from narrativeloom.utils.display_utils import _split_character_entries
+
+    raw = "\n".join(f"- Name{i}: role {i}" for i in range(6))
+    assert len(_split_character_entries(raw)) == 6
+
+
+def test_sanitize_typified_keeps_all_locked_english():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    locked = ["Peppa", "Kaelen", "Zura"]
+    raw = "- Peppa: wizard-pig assistant\n- Maiale: boar guardian"
+    plot = (
+        "- Kaelen plants seeds in the orbital farm\n"
+        "- Peppa uses her neural implant\n"
+        "- Zura threatens to terminate funding"
+    )
+    out = sanitize_typified_characters(
+        raw,
+        target=3,
+        locked_names=locked,
+        seed="Peppa and Kaelen on an orbital agri-station",
+        key_events=plot,
+    )
+    names = _sculptor_names("【人物塑造师】\n" + out)
+    assert "Peppa" in names
+    assert "Kaelen" in names
+    assert "Zura" in names
+    assert len(names) == 3
+
+
+def test_extract_english_names_from_narrative():
+    from narrativeloom.utils.display_utils import extract_english_names_from_narrative
+
+    plot = "Kaelen plants seeds. Peppa uses her implant. Zura threatens funding."
+    names = extract_english_names_from_narrative(plot, limit=5)
+    assert "Kaelen" in names
+    assert "Peppa" in names
+    assert "Zura" in names
+

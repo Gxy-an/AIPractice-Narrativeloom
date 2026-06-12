@@ -848,12 +848,24 @@ def generate_typified_beat(
         [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
         extract_seed_cast_names(seed),
     )
-    locked_txt = "、".join(locked) if locked else ""
+    locked_txt = ", ".join(locked) if locked and lang == "en" else ("、".join(locked) if locked else "")
     char_target = max(2, int(character_target_total or max(2, len(locked))))
     cast_focus = typified_cast_focus(genre_name, lang)
     extra_slots = max(0, char_target - len(locked))
     char_spec_en = f"exactly {char_target} lines"
     char_spec_zh = f"恰好 {char_target} 行"
+    en_cast_rule = (
+        f"CRITICAL: characters MUST list exactly {char_target} named people (one per line). "
+        f"Every locked name MUST appear unchanged."
+    )
+    if extra_slots > 0:
+        en_cast_rule += (
+            f" Besides locked names, add {extra_slots} supporting characters "
+            f"so the total reaches {char_target} lines."
+        )
+    zh_cast_rule = f"【人物硬性】characters 须恰好 {char_target} 行，全部锁定姓名必须保留且拼写不变。"
+    if extra_slots > 0:
+        zh_cast_rule += f"除锁定人物外，须再写 {extra_slots} 名体现题材特色的人物。"
     ke_min, ke_max = _arc_key_events_range(beat_index, num_sections)
     arc_phase = _story_arc_phase(beat_index, num_sections, prior_summary)
     ke_spec = _arc_key_events_spec(ke_min, ke_max, lang)
@@ -887,8 +899,9 @@ def generate_typified_beat(
             "If a canon list is given, reuse exact character names. "
             "SEED CAST: If sparkles name protagonists, you MUST keep those exact names and roles—do not replace them with new characters. "
             "CHARACTER CONTINUITY: If prior character profiles are given, the characters field MUST update them—"
-            "keep every locked name unchanged; refresh motives, relationships, and in-scene status for this beat; "
-            "you may add at most one new named character if the genre persona demands it. "
+            "keep every locked name unchanged; refresh motives, relationships, and in-scene status for this beat. "
+            + en_cast_rule
+            + " "
             "CONTINUITY: If prior sections text is provided, this section MUST causally follow them; do not reset the timeline "
             "or ignore established facts unless the seed demands a deliberate jump (then signal it clearly). "
             "DIVERSITY: You ONLY represent this genre persona; setting and characters must reflect THIS genre's "
@@ -919,7 +932,7 @@ def generate_typified_beat(
                 + "\n"
             )
         if locked_txt:
-            user += f"\nLOCKED NAMES (must all appear in characters, unchanged spelling): {locked_txt}\n"
+            user += f"\nLOCKED NAMES (must ALL appear in characters, unchanged spelling): {locked_txt}\n"
         seed_cast = extract_seed_cast_names(seed)
         if seed_cast:
             user += (
@@ -963,8 +976,9 @@ def generate_typified_beat(
             "【种子人物】若创意种子已给出主角姓名（含「·」的复合名），characters 必须全部保留且不得改名或替换为其它人物。"
             "【连续性】若下方提供「已定前文」，本节必须在其人物状态、时间线与因果链上自然递进，禁止无视前文后果或擅自重置故事。"
             "【人物承接】若提供「已定人物档案」，characters 须在其基础上更新：所有已锁定姓名必须保留且不得改名；"
-            "为每位已登场人物补充或调整本节的状态、动机与关系；可按当前题材人格新增至多一名新角色。"
-            "【人物硬性要求】仅列真实人物（人类或具名角色），禁止把机器、设备、嗅探器、巡逻装置、AI 系统写成人物。"
+            "为每位已登场人物补充或调整本节的状态、动机与关系。"
+            + zh_cast_rule
+            + "【人物硬性要求】仅列真实人物（人类或具名角色），禁止把机器、设备、嗅探器、巡逻装置、AI 系统写成人物。"
             + proc
         )
         user = (
@@ -1010,7 +1024,8 @@ def generate_typified_beat(
                 f"\n除锁定人物外，须再写 {extra_slots} 名体现「{genre_name}」题材特色的配角；"
                 "其姓名、职业、关系须与其它题材人格并行候选显著不同，禁止共用同一套配角模板。"
             )
-    raw = complete_chat(cfg, system, user, temperature=0.84, max_tokens=1500 if not feedback_process else 1900)
+    max_tokens = (2400 if not feedback_process else 2800) if lang == "en" else (1500 if not feedback_process else 1900)
+    raw = complete_chat(cfg, system, user, temperature=0.84, max_tokens=max_tokens)
     data = _parse_json_content(raw)
     if not data:
         data = {"setting": raw[:400], "characters": "", "key_events": ""}

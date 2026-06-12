@@ -1579,7 +1579,8 @@ def _render_creation_wizard(lg: str) -> None:
         )
     if "wiz_protagonists" not in st.session_state:
         preset = st.session_state.get("preset_protagonist_names") or []
-        st.session_state.wiz_protagonists = "、".join(preset) if preset else ""
+        sep = ", " if lg == "en" else "、"
+        st.session_state.wiz_protagonists = sep.join(preset) if preset else ""
     wizard_open(lg)
     c1, c2 = st.columns([1, 1])
     with c1:

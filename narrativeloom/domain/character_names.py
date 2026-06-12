@@ -382,6 +382,8 @@ def _is_narrative_cast_candidate(name: str, *, context: str = "") -> bool:
         return False
     if re.search(r"(的$|地$|得$|着$|了$|过$|在$|把$|被$|与$|和$|及$|或$)", n):
         return False
+    if _is_latin_person_name(n):
+        return True
     return bool(re.fullmatch(r"[\u4e00-\u9fff]{2,4}", n))
 
 
@@ -613,21 +615,38 @@ def extract_seed_cast_names(text: str, *, limit: int = 6) -> List[str]:
     return ranked[:limit]
 
 
+_LATIN_PERSON_NAME = re.compile(r"^[A-Za-z][A-Za-z'\-\.· ]{0,28}[A-Za-z]?$")
+_EN_NAME_BLOCK = frozenset(
+    {"AI", "IT", "OK", "NO", "ID", "UI", "UX", "VR", "AR", "OR", "IF", "TO", "GO", "US", "UK", "EU", "THE", "AND", "FOR", "NOT", "BUT", "HER", "HIS", "SHE", "HIM", "YOU", "OUR", "ALL", "ANY", "ONE", "TWO", "NEW", "OLD", "RED", "BIG", "DAY", "WAY", "MAN", "MEN", "WHO", "WHY", "HOW", "OUT", "OFF", "TOP", "END", "SET", "PUT", "RUN", "GOT", "GET", "CAN", "MAY", "USE", "USED", "USING", "WITH", "FROM", "INTO", "UPON", "OVER", "UNDER", "AFTER", "BEFORE", "WHEN", "THEN", "THAN", "THAT", "THIS", "THEY", "THEM", "THEIR", "THERE", "HERE", "WHERE", "WHILE", "WHICH", "WHAT", "WERE", "WAS", "ARE", "HAS", "HAD", "HAVE", "BEEN", "BEING", "WILL", "WOULD", "COULD", "SHOULD", "MUST", "MIGHT", "SHALL", "ONLY", "ALSO", "JUST", "EVEN", "STILL", "ONCE", "MORE", "MOST", "SOME", "SUCH", "VERY", "EACH", "BOTH", "FEW", "MANY", "MUCH", "MADE", "MAKE", "TAKE", "TAKEN", "GIVE", "GIVEN", "SAID", "SAYS", "TELL", "TOLD", "SEEN", "SHOW", "SHOWS", "FIND", "FOUND", "KEEP", "KEPT", "LEFT", "RIGHT", "BACK", "DOWN", "UP", "OUT", "NEAR", "FAR", "LONG", "SHORT", "HIGH", "LOW", "GOOD", "BAD", "BEST", "LAST", "FIRST", "NEXT", "YEAR", "YEARS", "TIME", "PLACE", "WORLD", "STORY", "SCENE", "PLOT", "BEAT", "BEATS", "SECTION", "MAGIC", "PORTRAIT", "MURAL", "PIG", "PIGS", "SOUL", "FIBER", "FIBRE", "SEED", "SEEDS", "ORBITAL", "STATION", "RENAISSANCE", "FLORENCE", "ITALY", "ITALIAN", "ENGLISH", "CHINESE", "SPACE", "SCI", "FI", "FANTASY", "BUILDER", "FUTURIST"}
+)
+
+
+def _is_latin_person_name(name: str) -> bool:
+    n = (name or "").strip()
+    if not n or len(n) < 2 or len(n) > 32:
+        return False
+    if n.upper() in _EN_NAME_BLOCK:
+        return False
+    if not _LATIN_PERSON_NAME.fullmatch(n):
+        return False
+    return not is_false_person_name(n, context=n)
+
+
 def parse_preset_protagonist_names(text: str) -> List[str]:
-    """向导中用户预设的主角姓名（顿号分隔）。"""
+    """向导中用户预设的主角姓名（顿号/逗号分隔，支持中英文）。"""
     blob = (text or "").strip()
     if not blob:
         return []
     found: List[str] = []
-    for part in re.split(r"[、]+", blob):
-        p = part.strip().strip("「」\"'（）()")
+    for part in re.split(r"[、,，;；\n]+", blob):
+        p = part.strip().strip("「」\"'（）()[]")
         if not p or is_false_person_name(p, context=p):
             continue
-        if _is_compound_cast_name(p) or _is_person(p):
+        if _is_compound_cast_name(p) or _is_person(p) or _is_latin_person_name(p):
             if p not in found:
                 found.append(p)
             continue
-        if re.fullmatch(r"[\u4e00-\u9fff]{2,5}", p) and p not in found:
+        if re.fullmatch(r"[\u4e00-\u9fff]{2,6}", p) and p not in found:
             found.append(p)
     return found
 
@@ -754,7 +773,11 @@ def _extract_verbed_cn_names(text: str, *, limit: int = 8) -> List[str]:
 
 def extract_cast_from_narrative(text: str, *, limit: int = 8) -> List[str]:
     """从剧情文本提取人物：并列结构 + display_utils 严格扫描。"""
-    from narrativeloom.utils.display_utils import extract_names_from_narrative, extract_relation_names
+    from narrativeloom.utils.display_utils import (
+        extract_english_names_from_narrative,
+        extract_names_from_narrative,
+        extract_relation_names,
+    )
 
     blob = (text or "").strip()
     if not blob:
@@ -775,13 +798,16 @@ def extract_cast_from_narrative(text: str, *, limit: int = 8) -> List[str]:
     for n in extract_names_from_narrative(blob, limit=limit):
         if n not in cast:
             cast.append(n)
+    for n in extract_english_names_from_narrative(blob, limit=limit):
+        if n not in cast:
+            cast.append(n)
 
     ranked = sorted(cast, key=lambda n: (-_mentions(blob, n), cast.index(n)))
     out: List[str] = []
     for n in ranked:
         if n in out:
             continue
-        if _is_narrative_cast_candidate(n, context=blob) or _is_person(n):
+        if _is_narrative_cast_candidate(n, context=blob) or _is_person(n) or _is_latin_person_name(n):
             out.append(n)
         if len(out) >= limit:
             break
@@ -825,6 +851,8 @@ def merge_unique_names(*lists: List[str]) -> List[str]:
             if _is_compound_cast_name(resolved) or _is_seed_cast_name(resolved, context=resolved):
                 canon = resolved
             elif _is_person(resolved):
+                canon = resolved
+            elif _is_latin_person_name(resolved):
                 canon = resolved
             elif re.fullmatch(r"[\u4e00-\u9fff]{2,6}", resolved) and not is_false_person_name(
                 resolved, context=resolved
