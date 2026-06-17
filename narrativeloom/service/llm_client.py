@@ -1003,6 +1003,7 @@ def generate_typified_beat(
             "【人物承接】若提供「已定人物档案」，characters 须在其基础上更新：所有已锁定姓名必须保留且不得改名；"
             "为每位已登场人物补充或调整本节的状态、动机与关系。"
             + zh_cast_rule
+            + "【人物与事件一致】key_events 中出现的具名人物必须全部写入 characters；禁止把街名、地名、场景词当作人物姓名。"
             + "【人物硬性要求】仅列真实人物（人类或具名角色），禁止把机器、设备、嗅探器、巡逻装置、AI 系统写成人物。"
             + proc
         )
@@ -1117,6 +1118,7 @@ def generate_typified_beat(
         key_events=str(data.get("key_events", "")),
         prior_characters_block=prior_characters_block,
         strict_narrative_allowlist=False,
+        require_narrative_grounding=False,
         max_characters=8,
         lang=lang,
     )
@@ -1275,9 +1277,9 @@ _UNIFIED_FN_BULLET_FORMAT_ZH = (
 )
 
 _UNIFIED_FN_LENGTH_ZH = (
-    "【篇幅控制·易读】设定/剧情/冲突/细节等职能以 2–4 条 bullet 为宜，每条≤32 字；"
-    "设定构建师仅写地点/时间/场景/规则四项；剧情逻辑师≤4 条；冲突设计师≤4 条。"
-    "【人物塑造师】每人一行须写身份/性格/关系（≤40 字，自然短句，禁止半句截断）；"
+    "【篇幅控制·易读】设定/剧情/冲突/细节等职能以 2–3 条 bullet 为宜，每条≤24 字；"
+    "设定构建师仅写地点/时间/场景/规则四项（已知信息一句带过）；剧情逻辑师≤3 条；冲突设计师≤3 条。"
+    "【人物塑造师】每人一行须写身份/性格/关系（≤28 字，自然短句，禁止半句截断）；"
     "禁止「动机是」「关系是」「本节状态」等标签；禁止单独写本节状态句。"
     "人物姓名须完整（如「阿依古丽」「艾买提」），禁止误截为「古丽」「艾买」等短名；禁止姓名中间插入冒号。"
 )
@@ -1306,33 +1308,33 @@ def _unified_fn_length_guidance(beat_index: int, num_sections: int, lang: str) -
     if lang == "en":
         if phase == "opening":
             return (
-                "LENGTH: 2-4 bullets per role block, ≤28 words each; "
-                "character sculptor ≤40 words per line."
+                "LENGTH: 2-3 bullets per role block, ≤22 words each; "
+                "character sculptor ≤32 words per line."
             )
         if phase == "development":
             return (
-                "LENGTH: 2-3 bullets per role block, ≤24 words each; "
-                "setting architect ≤3 items (one-line recap for known facts); "
-                "character sculptor ≤32 words per line."
+                "LENGTH: 2-3 bullets per role block, ≤20 words each; "
+                "setting architect ≤2 items (one-line recap for known facts); "
+                "character sculptor ≤26 words per line."
             )
         return (
-            "LENGTH: 2-3 bullets per role block, ≤20 words each; "
-            "setting architect ≤2 items; plot logic ≤3 bullets; "
-            "character sculptor ≤28 words per line; no repeating earlier beats."
+            "LENGTH: 2 bullets per role block, ≤18 words each; "
+            "setting architect ≤2 items; plot logic ≤2 bullets; "
+            "character sculptor ≤22 words per line; no repeating earlier beats."
         )
     if phase == "opening":
         return _UNIFIED_FN_LENGTH_ZH
     if phase == "development":
         return (
-            "【篇幅控制·发展段】各职能分块 2～3 条 bullet，每条≤26 字；"
-            "设定构建师最多 3 项（已知地点/时间一句带过）；"
-            "剧情逻辑师≤3 条；冲突设计师≤3 条；"
-            "人物塑造师每人一行≤32 字（只写状态变化，禁止重抄人设）。"
+            "【篇幅控制·发展段】各职能分块 2～3 条 bullet，每条≤22 字；"
+            "设定构建师最多 2 项（已知地点/时间一句带过）；"
+            "剧情逻辑师≤3 条；冲突设计师≤2 条；"
+            "人物塑造师每人一行≤24 字（只写状态变化，禁止重抄人设）。"
         )
     return (
-        "【篇幅控制·高潮段】各职能分块 2～3 条 bullet，每条≤22 字；"
-        "设定构建师最多 2 项；剧情逻辑师≤3 条；冲突设计师≤3 条；"
-        "人物塑造师每人一行≤28 字；禁止复述前文已写情节。"
+        "【篇幅控制·高潮段】各职能分块 2 条 bullet，每条≤20 字；"
+        "设定构建师最多 2 项；剧情逻辑师≤2 条；冲突设计师≤2 条；"
+        "人物塑造师每人一行≤22 字；禁止复述前文已写情节。"
     )
 
 

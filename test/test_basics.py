@@ -1117,3 +1117,85 @@ def test_functional_en_outline_normalization_uses_english_fallbacks():
     assert "Core conflict" in out
     assert "Peppa" in out
 
+
+def test_sanitize_typified_rejects_street_corner_false_name():
+    from narrativeloom.domain.character_names import is_false_person_name
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    setting = "乾隆二十八年盛夏，北京正阳门外大栅栏一带，街口石板滚烫，蝉鸣聒噪"
+    assert is_false_person_name("街口却", context=setting)
+    raw = (
+        "- 张问樵：翰林院编修，查粮价\n"
+        "- 赵铁柱：粮铺掌柜，担心被抢\n"
+        f"- 街口却：{setting}茶棚布帘"
+    )
+    key_events = (
+        "- 张问樵见粮铺挂缺货牌，骡车却往巷里运粮\n"
+        "- 赵铁柱说内府太监逼商抬价\n"
+        "- 慧明和尚悄悄塞给张问樵一张密笺"
+    )
+    out = sanitize_typified_characters(
+        raw,
+        target=3,
+        seed="查粮价",
+        setting=setting,
+        key_events=key_events,
+        require_narrative_grounding=False,
+    )
+    names = _sculptor_names("【人物塑造师】\n" + out)
+    assert "街口却" not in names
+    assert "慧明" in names
+    assert len(names) == 3
+
+
+def test_sanitize_typified_syncs_event_only_character():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    setting = "2005年北京胡同夏日午后"
+    raw = "- 老张：退休木匠\n- 刘婶：邻居"
+    key_events = (
+        "- 老张发现冰窖门缝冒冷气\n"
+        "- 小梅带来一张旧地契，说冰窖是她家祖产\n"
+        "- 三人决定夜里下去探看"
+    )
+    out = sanitize_typified_characters(
+        raw,
+        target=3,
+        setting=setting,
+        key_events=key_events,
+        require_narrative_grounding=False,
+    )
+    names = _sculptor_names("【人物塑造师】\n" + out)
+    assert "小梅" in names
+    assert len(names) == 3
+
+
+def test_functional_outline_condenses_long_zh_bullets():
+    from narrativeloom.utils.display_utils import normalize_single_unified_outline
+
+    role_names = ["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"]
+    long_plot = "- " + "甲" * 60
+    outline = (
+        "【设定构建师】\n"
+        "- 地点：北京胡同\n"
+        "- 时间：2005年夏\n"
+        "- 场景：冰窖\n"
+        "- 规则：邻里互助\n"
+        "【人物塑造师】\n"
+        "- 老张：退休木匠，担心冰窖出事\n"
+        "【剧情逻辑师】\n"
+        f"{long_plot}\n"
+        f"{long_plot}\n"
+        f"{long_plot}\n"
+        f"{long_plot}\n"
+        f"{long_plot}\n"
+        "【冲突设计师】\n"
+        f"{long_plot}\n"
+        f"{long_plot}\n"
+    )
+    out = normalize_single_unified_outline(outline, role_names=role_names, lang="zh")
+    plot_block = out.split("【冲突设计师】", 1)[0].split("【剧情逻辑师】", 1)[1]
+    plot_lines = [ln for ln in plot_block.splitlines() if ln.strip().startswith("-")]
+    assert len(plot_lines) <= 3
+    assert all(len(ln.lstrip("-·• ").strip()) <= 36 for ln in plot_lines)
+

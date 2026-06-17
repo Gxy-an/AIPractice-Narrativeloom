@@ -231,10 +231,39 @@ def is_false_person_name(name: str, *, context: str = "") -> bool:
         return True
     if re.match(r"^(个人|国家|社会|艺术|生存|理想|神圣|核心).{0,2}(安危|现实|矛盾|冲突|构图|逻辑)$", n):
         return True
-    if len(n) >= 3 and re.search(r"(假|借|贷|问|说|看|听|走|跑|来|去|在|到|向|把|被|将|给|让|叫|请|想|能|会|可|应|该|须|需)$", n):
+    if len(n) >= 3 and re.search(
+        r"(假|借|贷|问|说|看|听|走|跑|来|去|在|到|向|把|被|将|给|让|叫|请|想|能|会|可|应|该|须|需"
+        r"|却|但|而|又|也|就|还|仍|便|若|如)$",
+        n,
+    ):
         stem = n[:-1]
-        if stem and re.search(rf"{re.escape(stem)}[假借贷问说看听走来去到向把被将给让叫请想能会可应该须需]", context or n):
+        if stem and re.search(
+            rf"{re.escape(stem)}[假借贷问说看听走来去到向把被将给让叫请想能会可应该须需却但而又也就还仍便若如]",
+            context or n,
+        ):
             return True
+    if re.search(
+        r"(?:街口|巷口|道口|路口|街道口|胡同口|弄堂|大街|广场|城门|宫门|桥口|码头|渡口|关口|隘口|坊口|茶棚|旗杆|大栅栏|正阳门|琉璃厂)",
+        n,
+    ):
+        return True
+    if re.match(r"^[见却到向把被给让]", n) and len(n) >= 3:
+        stem = re.sub(r"^[见却到向把被给让]+", "", n)
+        if stem and stem != n and re.search(re.escape(stem), context or ""):
+            return True
+    if re.match(r"^[\u4e00-\u9fff]{1,3}口$", n):
+        if not _is_compound_cast_name(n) and not _is_seed_cast_name(n, context=context or n):
+            return True
+    if (
+        len(n) <= 4
+        and re.search(
+            r"(?:街口|巷口|道口|路口|街道|胡同|弄堂|大街|广场|城门|宫门|桥口|码头|渡口|关口|隘口|坊口|茶棚|大栅栏|正阳门|琉璃厂)",
+            n,
+        )
+        and not _is_compound_cast_name(n)
+        and not _is_seed_cast_name(n, context=context or n)
+    ):
+        return True
     if n in _TIME_POINT_WORDS or _WEEKDAY_TIME_FRAGMENT.match(n):
         return True
     if len(n) == 3 and n[0] == "周" and n[2] in "上下":
@@ -297,6 +326,8 @@ def _is_plot_allowlist_name(name: str, *, context: str = "") -> bool:
         return False
     if _is_compound_cast_name(n) or _is_person(n):
         return True
+    if _is_narrative_cast_candidate(n, context=blob):
+        return True
     if 3 <= len(n) <= 6 and re.fullmatch(r"[\u4e00-\u9fff]+", n) and n in (context or ""):
         return True
     return False
@@ -342,17 +373,29 @@ def _looks_like_scene_fragment(name: str) -> bool:
 
 
 def _looks_like_place_name_token(name: str, *, context: str = "") -> bool:
-    """「托斯卡乡村」等地名片段，不得当作人物。"""
+    """「托斯卡乡村」「街口却」等地名片段，不得当作人物。"""
     n = (name or "").strip()
     blob = context or ""
-    if not n or not blob:
+    if not n:
         return False
     if re.search(
-        rf"{re.escape(n)}(?:乡村|古镇|古城|城市|小镇|地区|区域|国家|省份|省|州|岛|半岛|平原|流域|山区|草原|沙漠|港口|码头)",
+        r"(?:街口|巷口|道口|路口|街道口|胡同|弄堂|大街|广场|城门|宫门|桥口|码头|渡口|关口|隘口|坊口|茶棚|大栅栏|正阳门|琉璃厂)",
+        n,
+    ):
+        return True
+    if re.match(r"^[\u4e00-\u9fff]{1,3}口$", n):
+        if not _is_compound_cast_name(n) and not _is_seed_cast_name(n, context=context or n):
+            return True
+    if not blob:
+        return False
+    if re.search(
+        rf"{re.escape(n)}(?:乡村|古镇|古城|城市|小镇|地区|区域|国家|省份|省|州|岛|半岛|平原|流域|山区|草原|沙漠|港口|码头|胡同|大街|广场|门外|门内|街口|巷口)",
         blob,
     ):
         return True
-    if re.search(rf"(?:地点|位于|地处)[：:\s][^\n]*{re.escape(n)}", blob):
+    if re.search(rf"(?:地点|位于|地处|时间[·•]?地点)[：:\s][^\n]*{re.escape(n)}", blob):
+        return True
+    if re.search(rf"{re.escape(n)}(?:的)?(?:石板|旗杆|茶棚|布帘|蝉鸣|热浪|胡同|大街|广场)", blob):
         return True
     return False
 
@@ -684,6 +727,10 @@ _VERB_AFTER_NAME = (
     "追问",
     "看守",
     "一旁",
+    "带来",
+    "塞给",
+    "递给",
+    "交给",
 )
 _VERB_AFTER_NAME_RE = "|".join(
     sorted({re.escape(v) for v in _VERB_AFTER_NAME}, key=len, reverse=True)
@@ -771,6 +818,33 @@ def _extract_verbed_cn_names(text: str, *, limit: int = 8) -> List[str]:
     return found
 
 
+def _extract_appellation_names(text: str, *, limit: int = 8) -> List[str]:
+    """「慧明和尚」「小梅带来」类称谓/小名锚定提取。"""
+    blob = text or ""
+    if not blob:
+        return []
+    found: List[str] = []
+    for m in re.finditer(
+        r"([\u4e00-\u9fff]{2,4})(?:和尚|法师|道士|尼姑|僧人|师父|师傅|掌柜|老板|婶|嫂|大爷|大妈|老头|少女|少年|女子|男子)",
+        blob,
+    ):
+        name = m.group(1)
+        if _is_narrative_cast_candidate(name, context=blob) and name not in found:
+            found.append(name)
+        if len(found) >= limit:
+            return found
+    for m in re.finditer(
+        r"([小老][\u4e00-\u9fff]{1,2})(?:带来|说|问|看|听|给|向|把|将|让|被|发现|赶到|来到|出现|递给|交给|塞给)",
+        blob,
+    ):
+        name = m.group(1)
+        if _is_narrative_cast_candidate(name, context=blob) and name not in found:
+            found.append(name)
+        if len(found) >= limit:
+            break
+    return found
+
+
 def extract_cast_from_narrative(text: str, *, limit: int = 8) -> List[str]:
     """从剧情文本提取人物：并列结构 + display_utils 严格扫描。"""
     from narrativeloom.utils.display_utils import (
@@ -785,7 +859,8 @@ def extract_cast_from_narrative(text: str, *, limit: int = 8) -> List[str]:
 
     cast: List[str] = []
     for n in (
-        _extract_verbed_cn_names(blob, limit=limit)
+        _extract_appellation_names(blob, limit=limit)
+        + _extract_verbed_cn_names(blob, limit=limit)
         + _extract_dyads(blob)
         + _extract_quoted(blob)
         + _extract_new_role(blob)

@@ -457,6 +457,7 @@ def _resanitize_typified_candidates(
             key_events=str(item.get("key_events", "")),
             prior_characters_block=prior,
             strict_narrative_allowlist=False,
+            require_narrative_grounding=False,
             max_characters=8,
             lang=lg,
         )

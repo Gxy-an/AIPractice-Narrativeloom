@@ -254,6 +254,57 @@ def _plain_setting_hint(setting: str) -> str:
     return (setting or "").strip()[:36]
 
 
+def _desc_duplicates_setting(desc: str, setting: str, *, threshold: float = 0.55) -> bool:
+    """人物描述若大段复述 setting，视为无效条目。"""
+    d = re.sub(r"\s+", "", (desc or "").strip())
+    s = re.sub(r"\s+", "", (setting or "").strip())
+    if not d or not s or len(d) < 10:
+        return False
+    if d in s or s in d:
+        return True
+    shorter, longer = (d, s) if len(d) <= len(s) else (s, d)
+    if len(shorter) >= 12 and longer.find(shorter[: min(len(shorter), 18)]) >= 0:
+        return True
+    overlap = sum(1 for ch in d if ch in s)
+    return overlap / max(len(d), 1) >= threshold
+
+
+def _event_cast_priority(key_events: str, *, seed: str = "", limit: int = 8) -> List[str]:
+    """从核心事件提取须出现在人物表中的姓名（按出现频次排序）。"""
+    from narrativeloom.domain.character_names import extract_cast_from_narrative
+
+    blob = "\n".join(x for x in (seed, key_events) if (x or "").strip())
+    if not blob.strip():
+        return []
+    return extract_cast_from_narrative(blob, limit=limit)
+
+
+def _rank_supplementary_cast_name(name: str, *, narrative: str) -> tuple:
+    """补人时优先具名角色，降低「老僧」等泛称优先级。"""
+    n = (name or "").strip()
+    generic = 0
+    if n in ("老僧", "老者", "少年", "少女", "三人", "两人", "男子", "女子", "人影", "身影"):
+        generic = 1
+    elif re.match(r"^老[\u4e00-\u9fff]{1,2}$", n) and n.endswith(("僧", "者", "汉", "妇")):
+        generic = 1
+    mentions = (narrative or "").count(n)
+    return (generic, -mentions, -len(n))
+
+
+def _drop_substring_cast_duplicates(names: List[str]) -> List[str]:
+    """剔除「利亚」「见周教授」等更长/误粘姓名的短片段或前缀粘连。"""
+    out: List[str] = []
+    for n in names:
+        if any(n != other and len(n) < len(other) and n in other for other in names):
+            continue
+        if re.match(r"^[见却到向把被给让]", n):
+            stem = re.sub(r"^[见却到向把被给让]+", "", n)
+            if stem and stem in names and stem != n:
+                continue
+        out.append(n)
+    return out
+
+
 def _resolve_character_description(
     name: str,
     desc: str = "",
@@ -473,6 +524,7 @@ def sanitize_typified_characters(
     key_events: str = "",
     prior_characters_block: str = "",
     strict_narrative_allowlist: bool = False,
+    require_narrative_grounding: bool = True,
     max_characters: int = 14,
     lang: str = "zh",
 ) -> str:
@@ -537,6 +589,8 @@ def sanitize_typified_characters(
                 return
             if _is_meta_character_label(n):
                 return
+            if desc and setting and _desc_duplicates_setting(desc, setting):
+                return
             if strict_narrative_allowlist:
                 resolved_anchor = _resolve_cast_name(n, locked, context=context) or n
                 in_allow = n in allow_set or resolved_anchor in allow_set
@@ -546,7 +600,7 @@ def sanitize_typified_characters(
                 if src_desc and not _valid_sculptor_entry(n, src_desc):
                     return
             elif n not in locked and not _is_compound_cast_name(n):
-                if not _name_appears_in_narrative(
+                if require_narrative_grounding and not _name_appears_in_narrative(
                     n, seed=seed, key_events=key_events, locked=locked
                 ):
                     resolved_anchor = _resolve_cast_name(n, locked, context=context) or n
@@ -577,12 +631,20 @@ def sanitize_typified_characters(
 
     cast_names = [n for n, _ in kept]
     plot_context = f"{seed}\n{setting}\n{key_events}"
-    fill_sources = list(_fallback_supplementary_names(
-        cast_names, full=context, seed=seed, narrative=plot_context, limit=target * 2
-    ))
+    fill_sources: List[str] = []
+    for n in _event_cast_priority(key_events, seed=seed, limit=target * 2):
+        if n and n not in cast_names and n not in fill_sources:
+            fill_sources.append(n)
     for n in plot_allowlist:
         if n not in cast_names and n not in fill_sources:
             fill_sources.append(n)
+    for n in _fallback_supplementary_names(
+        cast_names, full=context, seed=seed, narrative=plot_context, limit=target * 2
+    ):
+        if n not in cast_names and n not in fill_sources:
+            fill_sources.append(n)
+    fill_sources.sort(key=lambda n: _rank_supplementary_cast_name(n, narrative=plot_context))
+    fill_sources = _drop_substring_cast_duplicates(fill_sources)
     fill_idx = 0
     while len(cast_names) < target and fill_idx < len(fill_sources):
         extra = fill_sources[fill_idx]
@@ -3143,9 +3205,9 @@ def normalize_single_unified_outline(
         len(locked),
         int(character_target_total) if character_target_total is not None else len(locked),
     )
-    setting_cap = 140 if _is_en_lang(lang) else (36 if beat_index > 0 else 44)
-    plot_cap = 220 if _is_en_lang(lang) else 48
-    char_cap = 180 if _is_en_lang(lang) else 120
+    setting_cap = 100 if _is_en_lang(lang) else (28 if beat_index > 0 else 36)
+    plot_cap = 160 if _is_en_lang(lang) else 36
+    char_cap = 120 if _is_en_lang(lang) else 80
     plot_sources: List[str] = []
     narrative_sources: List[str] = []
     setting_sources: List[str] = []
@@ -3191,26 +3253,28 @@ def normalize_single_unified_outline(
                 body = abbreviate_established_sections(
                     body, title=title, beat_index=beat_index, locked_names=locked, lang=lang
                 )
-            body = condense_role_body(body, max_lines=sculpt_target, max_chars=char_cap, lang=lang)
+            body = condense_role_body(
+                body, max_lines=sculpt_target, max_chars=char_cap, lang=lang, truncate=True
+            )
         elif _is_setting_architect_title(title):
             body = format_setting_architect_body(body, lang=lang)
             body = abbreviate_established_sections(
                 body, title=title, beat_index=beat_index, locked_names=locked, lang=lang
             )
             body = condense_role_body(
-                body, max_lines=4, max_chars=setting_cap, lang=lang
+                body, max_lines=3, max_chars=setting_cap, lang=lang, truncate=True
             )
         elif _is_plot_logic_title(title):
             body = expand_plot_conflict_bullets(body)
-            body = condense_role_body(body, max_lines=5, max_chars=plot_cap, lang=lang)
+            body = condense_role_body(body, max_lines=3, max_chars=plot_cap, lang=lang, truncate=True)
         elif _is_conflict_designer_title(title):
             body = strip_conflict_obstacle_lines(body)
             body = expand_plot_conflict_bullets(body, drop_obstacles=True)
-            body = condense_role_body(body, max_lines=4, max_chars=plot_cap, lang=lang)
+            body = condense_role_body(body, max_lines=3, max_chars=plot_cap, lang=lang, truncate=True)
         elif "连贯" in title or "Consistency" in title:
-            body = condense_role_body(body, max_lines=2, max_chars=80 if _is_en_lang(lang) else 36, lang=lang)
+            body = condense_role_body(body, max_lines=2, max_chars=60 if _is_en_lang(lang) else 28, lang=lang, truncate=True)
         else:
-            body = condense_role_body(body, max_lines=3, max_chars=100 if _is_en_lang(lang) else 40, lang=lang)
+            body = condense_role_body(body, max_lines=3, max_chars=80 if _is_en_lang(lang) else 32, lang=lang, truncate=True)
         processed.append((title, scrub_functional_fragment(strip_mutation_markers(body))))
     final = _ordered_unified_sections(processed, role_names, lang=lang)
     return localize_functional_outline(rebuild_merge_sections(final), lang=lang)
