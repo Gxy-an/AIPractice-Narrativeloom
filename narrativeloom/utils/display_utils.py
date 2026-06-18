@@ -514,6 +514,44 @@ def _truncate_text_at_word(text: str, max_len: int) -> str:
     return cut.rstrip(".,;:-") if len(cut) >= max_len // 3 else s[:max_len].rstrip(".,;:-")
 
 
+def _fit_complete_bullet(text: str, max_chars: int, *, lang: str = "zh") -> str:
+    """将 bullet 收至 max_chars 内，保留完整分句/标签值，禁止追加省略号。"""
+    s = (text or "").strip()
+    if not s or len(s) <= max_chars:
+        return s
+    if _is_en_lang(lang):
+        return _truncate_text_at_word(s, max_chars)
+    parts = [p for p in re.split(r"(?<=[。！？；])", s) if p.strip()]
+    if len(parts) > 1:
+        acc = ""
+        for p in parts:
+            candidate = acc + p
+            if len(candidate) <= max_chars:
+                acc = candidate
+            else:
+                break
+        if acc.strip():
+            return acc.strip()
+    sep = "：" if "：" in s else (":" if ":" in s else "")
+    if sep:
+        label, _, rest = s.partition(sep)
+        rest = rest.strip()
+        for chunk_sep in ("，", ",", "；", ";", "、"):
+            if chunk_sep in rest:
+                head = rest.split(chunk_sep, 1)[0].strip()
+                candidate = f"{label}{sep}{head}"
+                if 2 <= len(head) and len(candidate) <= max_chars:
+                    return candidate
+        if rest and len(f"{label}{sep}{rest}") <= max_chars:
+            return f"{label}{sep}{rest}"
+    for chunk_sep in ("，", ",", "；", ";", "、"):
+        if chunk_sep in s:
+            head = s.split(chunk_sep, 1)[0].strip()
+            if len(head) >= 6 and len(head) <= max_chars:
+                return head
+    return ""
+
+
 def sanitize_typified_characters(
     text: Any,
     *,
@@ -3075,11 +3113,9 @@ def abbreviate_established_sections(
                     sep = ": " if _is_en_lang(lang) else "："
                     val = s.split("：", 1)[-1].split(":", 1)[-1].strip()
                     if len(val) > setting_cap:
-                        val = (
-                            _truncate_text_at_word(val, setting_cap)
-                            if _is_en_lang(lang)
-                            else val[:setting_cap]
-                        )
+                        val = _fit_complete_bullet(val, setting_cap, lang=lang)
+                        if not val:
+                            continue
                     s = f"{lab}{sep}{val}"
                     break
             out.append(s if s.startswith("-") else f"- {s}")
@@ -3128,7 +3164,7 @@ def condense_role_body(
     truncate: bool = False,
     lang: str = "zh",
 ) -> str:
-    """整理职能分块为 bullet 列表；英文默认保留整句，仅在 truncate 时在词边界截断。"""
+    """整理职能分块为 bullet 列表；超长行在分句/词边界收束，禁止半句加省略号。"""
     raw = (body or "").strip()
     if not raw:
         return raw
@@ -3138,17 +3174,13 @@ def condense_role_body(
         if not s or s in _KEY_EVENTS_TRIVIAL:
             continue
         if len(s) > max_chars:
-            if _is_en_lang(lang):
-                if truncate:
-                    s = _truncate_text_at_word(s, max_chars)
-            elif truncate:
-                s = s[: max_chars - 1] + "…"
-            else:
-                s = s[:max_chars]
+            s = _fit_complete_bullet(s, max_chars, lang=lang)
+            if not s:
+                continue
         out.append(f"- {s}")
         if len(out) >= max_lines:
             break
-    return "\n".join(out) if out else raw
+    return "\n".join(out)
 
 
 def _looks_like_story_outline(text: str) -> bool:
@@ -3205,9 +3237,9 @@ def normalize_single_unified_outline(
         len(locked),
         int(character_target_total) if character_target_total is not None else len(locked),
     )
-    setting_cap = 100 if _is_en_lang(lang) else (28 if beat_index > 0 else 36)
-    plot_cap = 160 if _is_en_lang(lang) else 36
-    char_cap = 120 if _is_en_lang(lang) else 80
+    setting_cap = 120 if _is_en_lang(lang) else (40 if beat_index > 0 else 48)
+    plot_cap = 180 if _is_en_lang(lang) else 48
+    char_cap = 140 if _is_en_lang(lang) else 44
     plot_sources: List[str] = []
     narrative_sources: List[str] = []
     setting_sources: List[str] = []
@@ -3254,7 +3286,7 @@ def normalize_single_unified_outline(
                     body, title=title, beat_index=beat_index, locked_names=locked, lang=lang
                 )
             body = condense_role_body(
-                body, max_lines=sculpt_target, max_chars=char_cap, lang=lang, truncate=True
+                body, max_lines=sculpt_target, max_chars=char_cap, lang=lang
             )
         elif _is_setting_architect_title(title):
             body = format_setting_architect_body(body, lang=lang)
@@ -3262,19 +3294,23 @@ def normalize_single_unified_outline(
                 body, title=title, beat_index=beat_index, locked_names=locked, lang=lang
             )
             body = condense_role_body(
-                body, max_lines=3, max_chars=setting_cap, lang=lang, truncate=True
+                body, max_lines=3, max_chars=setting_cap, lang=lang
             )
         elif _is_plot_logic_title(title):
             body = expand_plot_conflict_bullets(body)
-            body = condense_role_body(body, max_lines=3, max_chars=plot_cap, lang=lang, truncate=True)
+            body = condense_role_body(body, max_lines=3, max_chars=plot_cap, lang=lang)
         elif _is_conflict_designer_title(title):
             body = strip_conflict_obstacle_lines(body)
             body = expand_plot_conflict_bullets(body, drop_obstacles=True)
-            body = condense_role_body(body, max_lines=3, max_chars=plot_cap, lang=lang, truncate=True)
+            body = condense_role_body(body, max_lines=3, max_chars=plot_cap, lang=lang)
         elif "连贯" in title or "Consistency" in title:
-            body = condense_role_body(body, max_lines=2, max_chars=60 if _is_en_lang(lang) else 28, lang=lang, truncate=True)
+            body = condense_role_body(
+                body, max_lines=2, max_chars=80 if _is_en_lang(lang) else 40, lang=lang
+            )
         else:
-            body = condense_role_body(body, max_lines=3, max_chars=80 if _is_en_lang(lang) else 32, lang=lang, truncate=True)
+            body = condense_role_body(
+                body, max_lines=3, max_chars=100 if _is_en_lang(lang) else 40, lang=lang
+            )
         processed.append((title, scrub_functional_fragment(strip_mutation_markers(body))))
     final = _ordered_unified_sections(processed, role_names, lang=lang)
     return localize_functional_outline(rebuild_merge_sections(final), lang=lang)

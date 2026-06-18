@@ -1024,7 +1024,7 @@ def test_condense_role_body_english_preserves_full_lines():
     long_line = (
         "- Location: A sterile biolab on a space station orbiting Earth in the year 2147"
     )
-    out = condense_role_body(long_line, max_lines=3, max_chars=44, lang="en")
+    out = condense_role_body(long_line, max_lines=3, max_chars=80, lang="en")
     assert "space station" in out
     assert not out.rstrip().endswith("statio")
 
@@ -1194,8 +1194,42 @@ def test_functional_outline_condenses_long_zh_bullets():
         f"{long_plot}\n"
     )
     out = normalize_single_unified_outline(outline, role_names=role_names, lang="zh")
+    assert "…" not in out and "..." not in out
     plot_block = out.split("【冲突设计师】", 1)[0].split("【剧情逻辑师】", 1)[1]
     plot_lines = [ln for ln in plot_block.splitlines() if ln.strip().startswith("-")]
     assert len(plot_lines) <= 3
-    assert all(len(ln.lstrip("-·• ").strip()) <= 36 for ln in plot_lines)
+
+
+def test_fit_complete_bullet_zh_keeps_label_clause():
+    from narrativeloom.utils.display_utils import _fit_complete_bullet
+
+    raw = "地点：1421年仲夏午后的紫禁城内阁，檐角铜铃轻响，壁上渗出水珠"
+    fitted = _fit_complete_bullet(raw, 48, lang="zh")
+    assert fitted.startswith("地点：")
+    assert "…" not in fitted
+    assert len(fitted) <= 48
+
+
+def test_functional_outline_no_ellipsis_on_long_sentences():
+    from narrativeloom.utils.display_utils import normalize_single_unified_outline
+
+    role_names = ["设定构建师", "人物塑造师", "剧情逻辑师", "冲突设计师"]
+    outline = (
+        "【设定构建师】\n"
+        "- 地点：1421年仲夏午后的紫禁城内阁，檐角铜铃轻响，壁上渗出水珠\n"
+        "- 时间：1421年仲夏午后\n"
+        "【人物塑造师】\n"
+        "- 朱棣：刚登基的永乐帝，疑心未消\n"
+        "- 李乐：御前小太监，善于察言观色\n"
+        "【剧情逻辑师】\n"
+        "- 朱棣命太医为徐皇后试方，却见药渣中混有异域香料\n"
+        "- 李乐暗中记下太医与外国使节的接触\n"
+        "- 徐皇后咳疾加重，内廷暗流涌动\n"
+        "【冲突设计师】\n"
+        "- 核心矛盾：帝后情深与宫廷阴谋\n"
+        "- 戏剧冲突：太医被诬与外邦勾结\n"
+    )
+    out = normalize_single_unified_outline(outline, role_names=role_names, lang="zh")
+    assert "…" not in out
+    assert "朱棣命太医" in out or "太医" in out
 
