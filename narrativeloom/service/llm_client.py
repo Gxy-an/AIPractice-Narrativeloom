@@ -51,8 +51,8 @@ TYPIFIED_KEY_EVENTS_TOTAL_MAX = 300
 TYPIFIED_KEY_EVENT_CHARS_MIN_EN = 40
 TYPIFIED_KEY_EVENT_CHARS_MAX_EN = 160
 TYPIFIED_KEY_EVENTS_TOTAL_MAX_EN = 640
-PROSE_CHARS_PER_SECTION_MIN = 800
-PROSE_CHARS_PER_SECTION_MAX = 1000
+PROSE_CHARS_PER_SECTION_MIN = 1200
+PROSE_CHARS_PER_SECTION_MAX = 1500
 
 _PROSE_SECTION_STYLE_ZH = (
     "禁止平铺直叙与流水账；每小节须含至少两处带引号的对话、若干动作描写与环境氛围"
@@ -88,6 +88,14 @@ def _clamp_section_count(num_sections: int) -> int:
 def _prose_length_budget(num_sections: int) -> tuple[int, int]:
     n = _clamp_section_count(num_sections)
     return n * PROSE_CHARS_PER_SECTION_MIN, n * PROSE_CHARS_PER_SECTION_MAX
+
+
+def _prose_body_char_count(text: str) -> int:
+    return len(re.sub(r"\s+", "", text or ""))
+
+
+def _expand_prose_max_tokens(prose_max: int) -> int:
+    return min(28000, max(6000, int(prose_max * 2.4)))
 
 
 def typified_key_event_char_limits(lang: str) -> tuple[int, int, int]:
@@ -2110,7 +2118,8 @@ def expand_functional_section(
         system = (
             "You are a fiction writer. Expand the role-outline notes into a single continuous section of prose. "
             "Multiple paragraphs, scene work, dialogue where natural, clear causal flow. "
-            f"Target {PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words for this section only. "
+            f"Target {PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words for this section only; "
+            f"at least {PROSE_CHARS_PER_SECTION_MIN} words with plot beats, dialogue, and action. "
             + _PROSE_SECTION_STYLE_EN
             + " Honor the canon list for names. "
             "Do NOT output Markdown '#' headings, section numbers, or phase labels like 'Opening'; start directly in scene."
@@ -2128,7 +2137,8 @@ def expand_functional_section(
             "你是中文小说作者。根据各职能的「概述要点」拼接稿，扩写为**本小节独立叙事正文**。"
             "多段落：场景、动作、对白与心理穿插，因果清楚，与前文摘要自然衔接；"
             "至少两处引号对话，并写清环境氛围与人物动作，避免只列事件梗概。"
-            f"篇幅目标 {PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字（单节正文，勿写成整章长篇）。"
+            f"篇幅目标 {PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字（单节正文）；"
+            f"不得少于 {PROSE_CHARS_PER_SECTION_MIN} 字，用动作、对话与情节细节写足本节。"
             + _PROSE_SECTION_STYLE_ZH
             + "严格遵守设定清单中人物称谓；不要输出 JSON、不要复述职能标签堆砌。"
             "禁止输出以 # 开头的标题行、禁止写「小节1」「#开端」等结构标签；正文从第一段叙事直接起笔。"
@@ -2141,7 +2151,16 @@ def expand_functional_section(
             user = f"【设定清单】\n{canon_sheet}\n\n" + user
         if rag_excerpt:
             user = f"【相关前文摘录】\n{rag_excerpt}\n\n" + user
-    raw = (complete_chat(cfg, system, user, temperature=0.72, max_tokens=8000) or "").strip()
+    raw = (
+        complete_chat(
+            cfg,
+            system,
+            user,
+            temperature=0.72,
+            max_tokens=_expand_prose_max_tokens(PROSE_CHARS_PER_SECTION_MAX),
+        )
+        or ""
+    ).strip()
     return scrub_expanded_prose_artifacts(raw)
 
 
@@ -2432,6 +2451,29 @@ def _repair_expand_prose_raw(raw: str) -> Tuple[str, str]:
     return title, prose
 
 
+def _finalize_expanded_prose(raw: str) -> Tuple[str, str]:
+    title, prose = _repair_expand_prose_raw(raw)
+    if not prose:
+        data = _parse_json_content(raw)
+        if isinstance(data, dict):
+            title = title or str(data.get("title") or data.get("story_title") or "").strip()
+            prose = str(
+                data.get("prose") or data.get("body") or data.get("text") or data.get("content") or ""
+            ).strip()
+    if prose:
+        prose = scrub_expanded_prose_artifacts(prose)
+        prose = format_prose_paragraphs(prose)
+        if prose.lstrip().startswith("{") and '"prose"' in prose[:120]:
+            _, prose2 = _repair_expand_prose_raw(prose)
+            if prose2:
+                prose = format_prose_paragraphs(scrub_expanded_prose_artifacts(prose2))
+    else:
+        prose = format_prose_paragraphs(scrub_expanded_prose_artifacts(raw))
+    if title:
+        title = re.sub(r'[#"\'「」]', "", title).strip()[:48]
+    return title, prose
+
+
 def expand_prose(
     *,
     seed: str,
@@ -2446,13 +2488,13 @@ def expand_prose(
     """
     将小节汇编扩写为连贯长叙事。
     返回 (title, prose)：title 为模型建议的整篇标题（可能为空）；prose 为正文。
-    总篇幅与小节数正相关：每节约 800～1000 字（中英文同），须含对话、环境、动作等细节。
+    总篇幅与小节数正相关：每节约 1200～1500 字（中英文同），须含对话、环境、动作等细节。
     """
     cfg = _cfg_or_env(llm_cfg)
     bc = (beats_combined or "").strip()
     n_sec = _clamp_section_count(num_sections)
     prose_min, prose_max = _prose_length_budget(n_sec)
-    max_tokens = min(16000, max(5000, prose_max * 2))
+    max_tokens = _expand_prose_max_tokens(prose_max)
     typified = (persona_pool or "function") == "genre"
     temp = 0.76 if typified else 0.82
     if lang == "en":
@@ -2466,7 +2508,10 @@ def expand_prose(
                 "Keep setting brief and functional; avoid lyric padding, metaphor chains, and mood-only passages. "
                 "Dialogue must move the story forward—no empty small talk. "
                 f"Aim for roughly {prose_min}–{prose_max} words total ({n_sec} sections × "
-                f"{PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words each). Do not exceed the upper bound. "
+                f"{PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words each). "
+                f"Each section must reach at least {PROSE_CHARS_PER_SECTION_MIN} words; "
+                f"expand with plot beats, dialogue, and action—not padding. "
+                f"Do not fall below {prose_min} words for the full piece. "
                 + style_block
                 + " "
                 "Output ONE JSON object ONLY, no markdown fences, keys exactly: "
@@ -2485,7 +2530,9 @@ def expand_prose(
                 "Avoid reportage, clichés, and flat subject-verb-object chains. "
                 "Honor the outline's causality while letting scenes breathe with atmosphere and tension. "
                 f"Aim for roughly {prose_min}–{prose_max} words total ({n_sec} sections × {PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words each). "
-                "Do not exceed the upper bound. "
+                f"Each section must reach at least {PROSE_CHARS_PER_SECTION_MIN} words; "
+                f"expand with scene work, dialogue, and interior beats—not empty lyric padding. "
+                f"Do not fall below {prose_min} words for the full piece. "
                 + style_block
                 + " "
                 "Output ONE JSON object ONLY, no markdown fences, keys exactly: "
@@ -2520,7 +2567,9 @@ def expand_prose(
                 "环境描写一笔带过、紧贴动作，禁止大段静态铺陈、象征性抒情与华丽比喻堆砌。"
                 "禁止「仿佛/宛如/恰似」连篇与空洞哲思句；少用排比与形容词堆叠，多用动词与具体细节。"
                 f"总篇幅目标约 {prose_min}～{prose_max} 字（共 {n_sec} 个小节，每节约 "
-                f"{PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字）；不得超过上限。"
+                f"{PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字）；"
+                f"每节不得少于 {PROSE_CHARS_PER_SECTION_MIN} 字，全文不得少于 {prose_min} 字；"
+                f"用动作、对话与情节细节充实篇幅，禁止无效重复与空洞注水。"
                 + style_block
                 + "严格遵守人物称谓与设定清单。"
                 "【输出格式】只输出一个 JSON 对象，不要 Markdown 代码围栏；键名固定为："
@@ -2541,7 +2590,8 @@ def expand_prose(
                 "在严守汇编因果与人物称谓的前提下，让场景有呼吸感与张力，意象要具体可感，"
                 "可适度运用诗性语句，但避免堆砌辞藻或空洞抒情。"
                 f"总篇幅目标约 {prose_min}～{prose_max} 字（共 {n_sec} 个小节，每节约 {PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字，与小节数正相关）；"
-                "不得超过上限，避免冗长重复。"
+                f"每节不得少于 {PROSE_CHARS_PER_SECTION_MIN} 字，全文不得少于 {prose_min} 字；"
+                f"用场景、对话与心理细节写足各节，避免无效重复与空洞抒情。"
                 + style_block
                 + "严格遵守人物称谓与设定清单。"
                 "【输出格式】只输出一个 JSON 对象，不要 Markdown 代码围栏；键名固定为："
@@ -2563,23 +2613,42 @@ def expand_prose(
             user += "【类型化扩写】优先落实各节核心事件与冲突，减少辞藻堆砌与空洞抒情。\n"
         user += "请输出上述 JSON。"
     raw = (complete_chat(cfg, system, user, temperature=temp, max_tokens=max_tokens, retry_attempts=8, retry_pause=3.0) or "").strip()
-    title, prose = _repair_expand_prose_raw(raw)
-    if not prose:
-        data = _parse_json_content(raw)
-        if isinstance(data, dict):
-            title = title or str(data.get("title") or data.get("story_title") or "").strip()
-            prose = str(data.get("prose") or data.get("body") or data.get("text") or data.get("content") or "").strip()
-    if prose:
-        prose = scrub_expanded_prose_artifacts(prose)
-        prose = format_prose_paragraphs(prose)
-        if prose.lstrip().startswith("{") and '"prose"' in prose[:120]:
-            _, prose2 = _repair_expand_prose_raw(prose)
-            if prose2:
-                prose = format_prose_paragraphs(scrub_expanded_prose_artifacts(prose2))
-    else:
-        prose = format_prose_paragraphs(scrub_expanded_prose_artifacts(raw))
-    if title:
-        title = re.sub(r'[#"\'「」]', "", title).strip()[:48]
+    title, prose = _finalize_expanded_prose(raw)
+    body_chars = _prose_body_char_count(prose)
+    if prose and body_chars < int(prose_min * 0.85):
+        if lang == "en":
+            extend_user = (
+                user
+                + f"\n\n[LENGTH REWRITE] The draft below is only ~{body_chars} words, below the target "
+                f"{prose_min}–{prose_max}. Rewrite and expand the FULL piece while keeping the same plot beats, "
+                f"characters, and section order. Each section needs at least {PROSE_CHARS_PER_SECTION_MIN} words.\n"
+                f"--- DRAFT ---\n{prose[:14000]}\n--- END ---\n"
+                "Return JSON with title and the complete expanded prose."
+            )
+        else:
+            extend_user = (
+                user
+                + f"\n\n【篇幅不足·重写扩写】下列初稿仅约 {body_chars} 字，低于目标 {prose_min}～{prose_max} 字。"
+                f"请在保留相同情节链、人物称谓与小节顺序的前提下，重写并充分扩写全文；"
+                f"每节至少 {PROSE_CHARS_PER_SECTION_MIN} 字，用动作、对话与情节细节充实。\n"
+                f"--- 初稿 ---\n{prose[:14000]}\n--- 结束 ---\n"
+                "请输出完整 JSON（title + 扩写后的完整 prose，不要只返回新增片段）。"
+            )
+        raw2 = (
+            complete_chat(
+                cfg,
+                system,
+                extend_user,
+                temperature=temp,
+                max_tokens=max_tokens,
+                retry_attempts=4,
+                retry_pause=3.0,
+            )
+            or ""
+        ).strip()
+        title2, prose2 = _finalize_expanded_prose(raw2)
+        if _prose_body_char_count(prose2) > body_chars:
+            title, prose = title2 or title, prose2
     return title, prose
 
 

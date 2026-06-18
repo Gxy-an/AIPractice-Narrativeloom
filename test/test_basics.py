@@ -1233,3 +1233,17 @@ def test_functional_outline_no_ellipsis_on_long_sentences():
     assert "…" not in out
     assert "朱棣命太医" in out or "太医" in out
 
+
+def test_prose_length_budget_scales_by_section():
+    from narrativeloom.service.llm_client import (
+        PROSE_CHARS_PER_SECTION_MAX,
+        PROSE_CHARS_PER_SECTION_MIN,
+        _prose_length_budget,
+    )
+
+    lo, hi = _prose_length_budget(4)
+    assert lo == 4 * PROSE_CHARS_PER_SECTION_MIN
+    assert hi == 4 * PROSE_CHARS_PER_SECTION_MAX
+    assert PROSE_CHARS_PER_SECTION_MIN >= 1200
+    assert PROSE_CHARS_PER_SECTION_MAX > PROSE_CHARS_PER_SECTION_MIN
+
