@@ -411,6 +411,61 @@ def _sync_beat_char_target(beat_idx: int, lg: str, pool: str) -> None:
         st.session_state[key] = suggested
         if pool == "genre":
             st.session_state[f"_typ_char_target_{beat_idx}"] = suggested
+        else:
+            st.session_state[f"_fc_char_target_{beat_idx}"] = suggested
+
+
+def _apply_functional_char_target(beat_idx: int, char_target: int) -> int:
+    """写入功能化小节人物目标（仅用非 widget 键，避免与 number_input 冲突）。"""
+    val = max(2, int(char_target))
+    st.session_state[f"_fc_char_target_{beat_idx}"] = val
+    return val
+
+
+def _resolve_functional_char_target(beat_idx: int, lg: str) -> int:
+    """解析当前小节功能化人物目标；重新生成时优先使用用户刚提交的值。"""
+    pending_key = f"_fn_regen_char_target_{beat_idx}"
+    if pending_key in st.session_state:
+        return _apply_functional_char_target(beat_idx, int(st.session_state.pop(pending_key)))
+    for key in (f"_fc_char_target_{beat_idx}", f"fn_char_total_{beat_idx}"):
+        if key in st.session_state:
+            return max(2, int(st.session_state[key]))
+    return max(2, _default_character_target(beat_idx, lg))
+
+
+def _renormalize_functional_variants(
+    beat_idx: int,
+    lg: str,
+    labels: List[Tuple[str, str]],
+    variants: List[Dict[str, Any]],
+    char_target: int,
+    *,
+    role_names: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """按目标人数二次规范化功能化总体方案（不重调 LLM）。"""
+    from narrativeloom.utils.display_utils import normalize_single_unified_outline, parse_character_profile_map
+
+    locked = _locked_character_names(beat_idx, lg)
+    target = max(int(char_target), len(locked), 2)
+    prior_profiles = parse_character_profile_map(_prior_characters_block(beat_idx, labels, lg))
+    roles = role_names or []
+    out: List[Dict[str, Any]] = []
+    for item in variants or []:
+        row = dict(item)
+        outline = str(row.get("outline") or "").strip()
+        if outline:
+            row["outline"] = normalize_single_unified_outline(
+                outline,
+                role_names=roles,
+                lang=lg,
+                locked_names=locked,
+                character_target_total=target,
+                beat_index=beat_idx,
+                seed=st.session_state.get("seed") or "",
+                prior_character_profiles=prior_profiles,
+            )
+        out.append(row)
+    return out
 
 
 def _apply_typified_char_target(beat_idx: int, char_target: int) -> int:
@@ -573,6 +628,10 @@ def _kickoff_beat_generation(
     if pool == "genre" and char_target is not None:
         val = _apply_typified_char_target(idx, char_target)
         st.session_state[f"_typ_regen_char_target_{idx}"] = val  # 生成阶段读取，勿写 widget 键
+    elif pool == "function" and char_target is not None:
+        val = _apply_functional_char_target(idx, char_target)
+        st.session_state[f"_fn_regen_char_target_{idx}"] = val
+    st.session_state.pop(f"_fn_char_norm_target_{idx}", None)
     _clear_beat_candidate_state()
     _clear_typified_ui_keys(idx)
     st.session_state["_generating_beat_idx"] = idx
@@ -777,9 +836,7 @@ def _generate_unified_functional(
     title, hint = labels[beat_idx]
     prior = _prior_summary(beat_idx, labels, lang)
     locked_chars = _locked_character_names(beat_idx, lang)
-    char_target = int(
-        st.session_state.get(f"fn_char_total_{beat_idx}", _default_character_target(beat_idx, lang))
-    )
+    char_target = _resolve_functional_char_target(beat_idx, lang)
     char_target = max(2, char_target, len(locked_chars))
     st.session_state[f"_fc_char_target_{beat_idx}"] = char_target
     prior_texts = [_beat_to_text(st.session_state.beats[i], lang) for i in range(beat_idx)]
@@ -916,7 +973,7 @@ def _generate_beat_candidates(
         locked_chars = _locked_character_names(idx, lg)
         char_target = max(
             2,
-            int(st.session_state.get(f"_fc_char_target_{idx}", _default_character_target(idx, lg))),
+            _resolve_functional_char_target(idx, lg),
             len(locked_chars),
         )
         from narrativeloom.utils.display_utils import parse_character_profile_map
@@ -941,6 +998,7 @@ def _generate_beat_candidates(
             norm_variants.append({**item, "outline": outline})
         st.session_state.functional_candidates = {**fc, "variants": norm_variants}
         st.session_state["_fc_beat_idx"] = idx
+        st.session_state[f"_fn_char_norm_target_{idx}"] = char_target
     st.session_state.beat_regen_count[idx] += 1
 
 
@@ -1404,7 +1462,13 @@ def _drafts_panel() -> None:
     for d in drafts:
         cols = st.columns([3, 1, 1])
         with cols[0]:
-            st.write(f"**{d.get('story_title', '—')}** · {d.get('updated_at', '')}")
+            pool = normalize_persona_pool(d.get("persona_pool", "genre"))
+            mode_label = T("pool_genre", lg) if pool == "genre" else T("pool_function", lg)
+            st.write(
+                f"**{d.get('story_title', '—')}** · "
+                f"{T('draft_mode_tag', lg).format(mode=mode_label)} · "
+                f"{d.get('updated_at', '')}"
+            )
         with cols[1]:
             if st.button(T("load", lg), key=f"ld_{d['_id']}"):
                 st.session_state.story_title = d.get("story_title", "我的故事")
@@ -1415,6 +1479,7 @@ def _drafts_panel() -> None:
                 _sync_beat_len_to_num_sections()
                 st.session_state.expanded_prose = d.get("expanded_prose", "")
                 st.session_state.persona_pool = normalize_persona_pool(d.get("persona_pool", "genre"))
+                st.session_state.persona_pool_locked = st.session_state.persona_pool
                 st.session_state.current_beat = int(d.get("current_beat", 0))
                 st.session_state.background_setting = d.get("background_setting", "")
                 st.session_state.background_characters = d.get("background_characters", "")
@@ -1434,8 +1499,19 @@ def _drafts_panel() -> None:
                     st.session_state["bg_char_options"] = co
                 else:
                     st.session_state.pop("bg_char_options", None)
+                fn_total = d.get("fn_story_char_total")
+                typ_total = d.get("typ_story_char_total")
+                if fn_total is not None:
+                    try:
+                        st.session_state.fn_story_char_total = max(2, int(fn_total))
+                    except (TypeError, ValueError):
+                        pass
+                if typ_total is not None:
+                    try:
+                        st.session_state.typ_story_char_total = max(2, int(typ_total))
+                    except (TypeError, ValueError):
+                        pass
                 st.session_state.wizard_done = True
-                st.session_state.persona_pool_locked = normalize_persona_pool(d.get("persona_pool", "genre"))
                 st.session_state.ui_nav = "new"
                 if d.get("draft_asm"):
                     st.session_state["draft_asm"] = d.get("draft_asm")
@@ -1964,15 +2040,30 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         st.session_state.get(f"fn_char_total_{idx}", char_default)
                     )
                     st.session_state[f"_fc_char_target_{idx}"] = live_char_target
+                    norm_key = f"_fn_char_norm_target_{idx}"
+                    applied = st.session_state.get(norm_key)
+                    if applied is None:
+                        st.session_state[norm_key] = live_char_target
+                    elif int(applied) != live_char_target:
+                        fc = st.session_state.functional_candidates
+                        renorm = _renormalize_functional_variants(
+                            idx,
+                            lg,
+                            labels,
+                            fc.get("variants") or [],
+                            live_char_target,
+                            role_names=chosen_roles,
+                        )
+                        st.session_state.functional_candidates = {**fc, "variants": renorm}
+                        st.session_state[norm_key] = live_char_target
+                        st.session_state.pop(f"_fn_merge_sync_pick_{idx}", None)
+                        st.session_state.pop(f"merge_preview_{idx}", None)
+                        st.rerun()
                     if idx == 0:
-                        st.session_state.fn_story_char_total = int(
-                            st.session_state.get(f"fn_char_total_{idx}", char_default)
-                        )
+                        st.session_state.fn_story_char_total = live_char_target
                     if st.button(T("fn_regen_plans", lg), key=f"fn_regen_plans_{idx}", type="secondary"):
-                        st.session_state.fn_story_char_total = int(
-                            st.session_state.get(f"fn_char_total_{idx}", char_default)
-                        )
-                        _kickoff_beat_generation(idx, "function")
+                        st.session_state.fn_story_char_total = live_char_target
+                        _kickoff_beat_generation(idx, "function", char_target=live_char_target)
 
                     plan_labels = _fn_plan_labels(lg, idx)
                     from narrativeloom.utils.display_utils import parse_character_profile_map
@@ -2135,6 +2226,8 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                 "expanded_prose": st.session_state.expanded_prose,
                 "draft_asm": st.session_state.get("draft_asm", ""),
                 "persona_pool": st.session_state.persona_pool,
+                "fn_story_char_total": int(st.session_state.get("fn_story_char_total", 2)),
+                "typ_story_char_total": int(st.session_state.get("typ_story_char_total", 2)),
                 "current_beat": st.session_state.current_beat,
                 "background_setting": st.session_state.background_setting,
                 "background_characters": st.session_state.background_characters,
@@ -2161,6 +2254,8 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                 "expanded_prose": st.session_state.expanded_prose,
                 "draft_asm": st.session_state.get("draft_asm", ""),
                 "persona_pool": st.session_state.persona_pool,
+                "fn_story_char_total": int(st.session_state.get("fn_story_char_total", 2)),
+                "typ_story_char_total": int(st.session_state.get("typ_story_char_total", 2)),
                 "current_beat": st.session_state.current_beat,
                 "background_setting": st.session_state.background_setting,
                 "background_characters": st.session_state.background_characters,
