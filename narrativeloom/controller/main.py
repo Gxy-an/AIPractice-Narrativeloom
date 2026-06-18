@@ -1214,6 +1214,7 @@ def _run_auto_expand_all(llm_cfg: Dict[str, Any], lg: str, n: int) -> None:
             rag_excerpt=rag_full,
             lang=lg,
             num_sections=n,
+            persona_pool=normalize_persona_pool(st.session_state.get("persona_pool", "genre")),
         )
     except Exception as e:  # noqa: BLE001
         msg = str(e)
@@ -2200,6 +2201,7 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         rag_excerpt=rag_full,
                         lang=lg,
                         num_sections=n,
+                        persona_pool=normalize_persona_pool(st.session_state.get("persona_pool", "genre")),
                     )
                     st.session_state.expanded_prose = prose_out
                     if new_title:

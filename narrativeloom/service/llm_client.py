@@ -59,10 +59,25 @@ _PROSE_SECTION_STYLE_ZH = (
     "（光线、气味、声响、触感等感官细节），句式长短错落，场景有画面感与张力；"
     "用展示代替告知（show, don't tell），避免「然后…接着…」式罗列。"
 )
+_PROSE_SECTION_STYLE_TYPIFIED_ZH = (
+    "【类型化·故事优先】以情节与冲突驱动全文，读者能清楚跟上「发生了什么、为何发生、接下来怎样」。"
+    "每小节须落实汇编中的核心事件链，按因果顺序推进，禁止跳过或改写已定转折。"
+    "每段至少包含一个可观察的动作、对话或抉择；对话须推动信息、冲突或关系变化，禁止空泛寒暄。"
+    "环境描写一笔带过、紧贴动作，禁止大段静态铺陈、象征性抒情与华丽比喻堆砌。"
+    "禁止「仿佛/宛如/恰似」连篇与空洞哲思句；少用排比与形容词堆叠，多用动词与具体细节。"
+    "每小节至少两处带引号对话；句式清晰易读，长短错落但不过度诗化。"
+)
 _PROSE_SECTION_STYLE_EN = (
     "Avoid flat summary narration; each section needs at least two quoted dialogue beats, "
     "concrete action, and sensory setting (light, sound, smell, texture); "
     "vary sentence rhythm; show don't tell—no 'and then… and then…' event lists."
+)
+_PROSE_SECTION_STYLE_TYPIFIED_EN = (
+    "STORY-FIRST (typified mode): drive each section with plot beats and conflict from the outline; "
+    "every paragraph must advance an action, choice, or consequence—no skipped turning points. "
+    "Dialogue must move information or conflict forward; keep setting brief and tied to action. "
+    "Avoid lyric padding, extended metaphor chains, and mood-only paragraphs without events. "
+    "Prefer clear verbs and readable pacing over ornate prose; at least two quoted lines per section."
 )
 
 
@@ -228,7 +243,9 @@ def _backfill_typified_key_events(
             "你只负责补全一个小节的「核心事件」字段。只输出 JSON，不要 Markdown："
             f'{{"key_events":"……"}} 。key_events 为单个字符串，内含 {ke_spec}，用 \\n 换行；'
             f"每行以「- 」开头；每条 {TYPIFIED_KEY_EVENT_CHARS_MIN}～{TYPIFIED_KEY_EVENT_CHARS_MAX} 字，"
-            "写具体动作、冲突或转折，须明显推动本节情节向前；必须与上方已定设定、人物一致，并体现题材人格「"
+            "写具体动作、冲突或转折，须明显推动本节情节向前；"
+            "每条须写清「谁做了什么、导致什么后果或悬念」，禁止纯抒情、禁止景物铺陈、禁止口号式排比；"
+            "必须与上方已定设定、人物一致，并体现题材人格「"
             + genre_name
             + "」的典型节奏；禁止空话、禁止只输出一个减号、禁止复述设定原文。"
         )
@@ -912,7 +929,8 @@ def generate_typified_beat(
             "'Name: role, relationship, in-scene action (8–18 words; concise, not a biography)'. "
             f"key_events: {ke_spec}, each starts with '- ', "
             f"each {TYPIFIED_KEY_EVENT_CHARS_MIN}–{TYPIFIED_KEY_EVENT_CHARS_MAX} words, "
-            "vivid causal beats that clearly advance the plot; no prose paragraphs. "
+            "concrete causal beats (who did what, with what consequence); no lyric filler or pure scenery; "
+            "clearly advance the plot; no prose paragraphs. "
             f"This section is in the {arc_label} arc of the story. "
             "If a canon list is given, reuse exact character names. "
             "SEED CAST: If sparkles name protagonists, you MUST keep those exact names and roles—do not replace them with new characters. "
@@ -981,14 +999,16 @@ def generate_typified_beat(
             "须含 setting, characters, key_events 三字段，均为字符串。"
             "JSON 硬性要求：三个字段的值里禁止出现未转义的英文双引号 \"；"
             "若需引号请用中文直角引号「」或单引号，或对引号写作 \\\"。否则会导致解析失败。"
-            "以故事质量为最高优先级：设定要有具体时间地点与感官细节；人物写清姓名与本节行动驱动即可，避免长篇小传；"
-            "因果清晰、避免空泛套话与口号式描写。"
+            "以故事质量为最高优先级：设定一行写清时间+地点即可，禁止修辞铺陈；人物写清姓名与本节行动驱动即可，避免长篇小传；"
+            "因果清晰、避免空泛套话与口号式描写；key_events 是全篇情节主干，须比 setting 更具体、更有冲突。"
             "【篇幅】三字段中文总字数（不含空白）约 300～420 字；信息密度高但避免长篇散文。"
-            "setting：仅一行，写清时间+地点（约 30～55 字）。"
+            "setting：仅一行，写清时间+地点（约 20～40 字，白描即可，禁止象征与抒情）。"
             f"characters：{char_spec_zh}，每行以「- 」开头，格式「姓名：身份/关系/本节行动」（每行 12～28 字，精炼短句，禁止年龄履历式长传记）。"
             f"key_events：{ke_spec}，每行以「- 」开头，"
             f"每条 {TYPIFIED_KEY_EVENT_CHARS_MIN}～{TYPIFIED_KEY_EVENT_CHARS_MAX} 字，"
-            "写具体动作、冲突或转折，须明显推动本节情节向前，鼓励意外与画面感。"
+            "写具体动作、冲突或转折，须明显推动本节情节向前；"
+            "每条须写清「谁做了什么、导致什么后果或悬念」，禁止纯抒情、禁止景物铺陈、禁止口号式排比。"
+            "每条须写清「谁做了什么、导致什么后果或悬念」，以事件链为主，禁止纯抒情、禁止景物铺陈、禁止口号式排比。"
             f"本节处于叙事弧「{arc_label}」阶段。"
             "【硬性】characters 与 key_events 均不得为空、不得只输出「—」或单个减号；若信息不足须合理补全。"
             "【题材差异化硬性要求】你只代表当前题材人格「"
@@ -2421,6 +2441,7 @@ def expand_prose(
     rag_excerpt: str = "",
     lang: str = "zh",
     num_sections: int = 6,
+    persona_pool: str = "function",
 ) -> Tuple[str, str]:
     """
     将小节汇编扩写为连贯长叙事。
@@ -2432,64 +2453,116 @@ def expand_prose(
     n_sec = _clamp_section_count(num_sections)
     prose_min, prose_max = _prose_length_budget(n_sec)
     max_tokens = min(16000, max(5000, prose_max * 2))
+    typified = (persona_pool or "function") == "genre"
+    temp = 0.76 if typified else 0.82
     if lang == "en":
-        system = (
-            "You are an accomplished literary fiction writer. Expand the beat compilation into "
-            "publishable literary prose with genuine style: vary sentence rhythm (lyrical long lines "
-            "against sharp short beats); use concrete sensory detail, metaphor, synesthesia, and "
-            "subtext in dialogue; allow brief interior monologue and controlled lyricism. "
-            "Avoid reportage, clichés, and flat subject-verb-object chains. "
-            "Honor the outline's causality while letting scenes breathe with atmosphere and tension. "
-            f"Aim for roughly {prose_min}–{prose_max} words total ({n_sec} sections × {PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words each). "
-            "Do not exceed the upper bound. "
-            + _PROSE_SECTION_STYLE_EN
-            + " "
-            "Output ONE JSON object ONLY, no markdown fences, keys exactly: "
-            '{"title":"Short literary title for the whole piece, 4–12 words, no section numbers","prose":"..."} . '
-            "The prose MUST NOT use Markdown '#' headings, section numbering, or meta labels like 'Opening'; "
-            "start directly in scene. "
-            "CRITICAL: prose must be ONE JSON string; use \\n\\n between paragraphs, NEVER \";\" between quoted chunks. "
-            "CRITICAL LANGUAGE: title and prose MUST be written entirely in English. Never use Chinese characters."
-        )
+        style_block = _PROSE_SECTION_STYLE_TYPIFIED_EN if typified else _PROSE_SECTION_STYLE_EN
+        if typified:
+            system = (
+                "You are a fiction writer focused on clear, engaging storytelling. Expand the beat compilation into "
+                "readable prose where plot and conflict stay in the foreground. "
+                "Follow the outline's event chain beat by beat; do not skip or soften turning points. "
+                "Every paragraph should advance action, dialogue, or a character choice with visible consequences. "
+                "Keep setting brief and functional; avoid lyric padding, metaphor chains, and mood-only passages. "
+                "Dialogue must move the story forward—no empty small talk. "
+                f"Aim for roughly {prose_min}–{prose_max} words total ({n_sec} sections × "
+                f"{PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words each). Do not exceed the upper bound. "
+                + style_block
+                + " "
+                "Output ONE JSON object ONLY, no markdown fences, keys exactly: "
+                '{"title":"Short literary title for the whole piece, 4–12 words, no section numbers","prose":"..."} . '
+                "The prose MUST NOT use Markdown '#' headings, section numbering, or meta labels like 'Opening'; "
+                "start directly in scene. "
+                "CRITICAL: prose must be ONE JSON string; use \\n\\n between paragraphs, NEVER \";\" between quoted chunks. "
+                "CRITICAL LANGUAGE: title and prose MUST be written entirely in English. Never use Chinese characters."
+            )
+        else:
+            system = (
+                "You are an accomplished literary fiction writer. Expand the beat compilation into "
+                "publishable literary prose with genuine style: vary sentence rhythm (lyrical long lines "
+                "against sharp short beats); use concrete sensory detail, metaphor, synesthesia, and "
+                "subtext in dialogue; allow brief interior monologue and controlled lyricism. "
+                "Avoid reportage, clichés, and flat subject-verb-object chains. "
+                "Honor the outline's causality while letting scenes breathe with atmosphere and tension. "
+                f"Aim for roughly {prose_min}–{prose_max} words total ({n_sec} sections × {PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words each). "
+                "Do not exceed the upper bound. "
+                + style_block
+                + " "
+                "Output ONE JSON object ONLY, no markdown fences, keys exactly: "
+                '{"title":"Short literary title for the whole piece, 4–12 words, no section numbers","prose":"..."} . '
+                "The prose MUST NOT use Markdown '#' headings, section numbering, or meta labels like 'Opening'; "
+                "start directly in scene. "
+                "CRITICAL: prose must be ONE JSON string; use \\n\\n between paragraphs, NEVER \";\" between quoted chunks. "
+                "CRITICAL LANGUAGE: title and prose MUST be written entirely in English. Never use Chinese characters."
+            )
         user = f"Sparkles: {seed}\n\n"
         if canon_sheet:
             user += f"Canon:\n{canon_sheet}\n\n"
         if rag_excerpt:
             user += f"Excerpts:\n{rag_excerpt}\n\n"
         user += f"Beat compilation ({n_sec} sections):\n{bc}\n\n"
+        if typified:
+            user += (
+                "Typified mode: prioritize plot beats and readable pacing over lyric description.\n"
+            )
         user += (
             "Write title and prose entirely in English even if the beat compilation contains other languages.\n"
             "Return JSON with title and prose."
         )
     else:
-        system = (
-            "你是资深中文文学小说作者。根据小节汇编扩写为具有文学质感的长叙事："
-            "句式长短错落，适当运用比喻、通感、象征与留白；"
-            "环境描写服务情绪与主题，动作与心理交织，对话须有潜台词与人物口吻，"
-            "每小节至少两处引号对话，场景切换处补足光线/气味/声响等感官细节；"
-            "禁止通篇「谁做了什么」的主谓宾流水账、公文腔与网络套话。"
-            "在严守汇编因果与人物称谓的前提下，让场景有呼吸感与张力，意象要具体可感，"
-            "可适度运用诗性语句，但避免堆砌辞藻或空洞抒情。"
-            f"总篇幅目标约 {prose_min}～{prose_max} 字（共 {n_sec} 个小节，每节约 {PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字，与小节数正相关）；"
-            "不得超过上限，避免冗长重复。"
-            + _PROSE_SECTION_STYLE_ZH
-            + "严格遵守人物称谓与设定清单。"
-            "【输出格式】只输出一个 JSON 对象，不要 Markdown 代码围栏；键名固定为："
-            '{"title":"……","prose":"……"} 。'
-            "title 为整篇作品的文学性标题（6～24 字），不要含小节号、不要「#开端」等相位词，不要复述正文首句。"
-            "prose 为扩写后的完整正文：禁止在 prose 中使用「#」「##」等 Markdown 标题行；"
-            "禁止以小节编号或「小节1」「#开端」等作为开头；正文从第一段叙事直接起笔。"
-            "【JSON 硬性】prose 必须是单个 JSON 字符串；段落之间用 \\n\\n，禁止用 \";\" 拼接多个引号字符串；"
-            "正文内的英文双引号须转义为 \\\"。"
-            "若模型未输出换行，也须在场景切换、对话前后、时间跳跃处主动分段。"
-        )
+        style_block = _PROSE_SECTION_STYLE_TYPIFIED_ZH if typified else _PROSE_SECTION_STYLE_ZH
+        if typified:
+            system = (
+                "你是中文小说作者，擅长把纲要扩写为**情节清楚、可读性强**的长叙事。"
+                "以汇编中的核心事件链为主线，按小节顺序逐条落实，禁止跳过或弱化已定转折。"
+                "每段至少推进一个动作、对话或抉择，并写出可见后果；因果链必须让读者跟得上。"
+                "对话须推动信息、冲突或关系变化，禁止空泛寒暄与独白式抒情。"
+                "环境描写一笔带过、紧贴动作，禁止大段静态铺陈、象征性抒情与华丽比喻堆砌。"
+                "禁止「仿佛/宛如/恰似」连篇与空洞哲思句；少用排比与形容词堆叠，多用动词与具体细节。"
+                f"总篇幅目标约 {prose_min}～{prose_max} 字（共 {n_sec} 个小节，每节约 "
+                f"{PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字）；不得超过上限。"
+                + style_block
+                + "严格遵守人物称谓与设定清单。"
+                "【输出格式】只输出一个 JSON 对象，不要 Markdown 代码围栏；键名固定为："
+                '{"title":"……","prose":"……"} 。'
+                "title 为整篇作品的标题（6～24 字），不要含小节号、不要「#开端」等相位词。"
+                "prose 为扩写后的完整正文：禁止 Markdown 标题行与小节编号；正文从第一段叙事直接起笔。"
+                "【JSON 硬性】prose 必须是单个 JSON 字符串；段落之间用 \\n\\n，禁止用 \";\" 拼接；"
+                "正文内的英文双引号须转义为 \\\"。"
+                "若模型未输出换行，也须在场景切换、对话前后、时间跳跃处主动分段。"
+            )
+        else:
+            system = (
+                "你是资深中文文学小说作者。根据小节汇编扩写为具有文学质感的长叙事："
+                "句式长短错落，适当运用比喻、通感、象征与留白；"
+                "环境描写服务情绪与主题，动作与心理交织，对话须有潜台词与人物口吻，"
+                "每小节至少两处引号对话，场景切换处补足光线/气味/声响等感官细节；"
+                "禁止通篇「谁做了什么」的主谓宾流水账、公文腔与网络套话。"
+                "在严守汇编因果与人物称谓的前提下，让场景有呼吸感与张力，意象要具体可感，"
+                "可适度运用诗性语句，但避免堆砌辞藻或空洞抒情。"
+                f"总篇幅目标约 {prose_min}～{prose_max} 字（共 {n_sec} 个小节，每节约 {PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字，与小节数正相关）；"
+                "不得超过上限，避免冗长重复。"
+                + style_block
+                + "严格遵守人物称谓与设定清单。"
+                "【输出格式】只输出一个 JSON 对象，不要 Markdown 代码围栏；键名固定为："
+                '{"title":"……","prose":"……"} 。'
+                "title 为整篇作品的文学性标题（6～24 字），不要含小节号、不要「#开端」等相位词，不要复述正文首句。"
+                "prose 为扩写后的完整正文：禁止在 prose 中使用「#」「##」等 Markdown 标题行；"
+                "禁止以小节编号或「小节1」「#开端」等作为开头；正文从第一段叙事直接起笔。"
+                "【JSON 硬性】prose 必须是单个 JSON 字符串；段落之间用 \\n\\n，禁止用 \";\" 拼接多个引号字符串；"
+                "正文内的英文双引号须转义为 \\\"。"
+                "若模型未输出换行，也须在场景切换、对话前后、时间跳跃处主动分段。"
+            )
         user = f"创意种子：{seed}\n\n"
         if canon_sheet:
             user += f"【人物与设定清单（必须遵守）】\n{canon_sheet}\n\n"
         if rag_excerpt:
             user += f"【前文摘录】\n{rag_excerpt}\n\n"
-        user += f"小节汇编（共 {n_sec} 节）：\n{bc}\n\n请输出上述 JSON。"
-    raw = (complete_chat(cfg, system, user, temperature=0.82, max_tokens=max_tokens, retry_attempts=8, retry_pause=3.0) or "").strip()
+        user += f"小节汇编（共 {n_sec} 节）：\n{bc}\n\n"
+        if typified:
+            user += "【类型化扩写】优先落实各节核心事件与冲突，减少辞藻堆砌与空洞抒情。\n"
+        user += "请输出上述 JSON。"
+    raw = (complete_chat(cfg, system, user, temperature=temp, max_tokens=max_tokens, retry_attempts=8, retry_pause=3.0) or "").strip()
     title, prose = _repair_expand_prose_raw(raw)
     if not prose:
         data = _parse_json_content(raw)
