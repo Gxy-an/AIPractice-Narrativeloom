@@ -60,12 +60,12 @@ _PROSE_SECTION_STYLE_ZH = (
     "用展示代替告知（show, don't tell），避免「然后…接着…」式罗列。"
 )
 _PROSE_SECTION_STYLE_TYPIFIED_ZH = (
-    "【类型化·故事优先】以情节与冲突驱动全文，读者能清楚跟上「发生了什么、为何发生、接下来怎样」。"
-    "每小节须落实汇编中的核心事件链，按因果顺序推进，禁止跳过或改写已定转折。"
-    "每段至少包含一个可观察的动作、对话或抉择；对话须推动信息、冲突或关系变化，禁止空泛寒暄。"
-    "环境描写一笔带过、紧贴动作，禁止大段静态铺陈、象征性抒情与华丽比喻堆砌。"
-    "禁止「仿佛/宛如/恰似」连篇与空洞哲思句；少用排比与形容词堆叠，多用动词与具体细节。"
-    "每小节至少两处带引号对话；句式清晰易读，长短错落但不过度诗化。"
+    "【类型化·均衡叙事】情节与冲突仍是主线，读者能跟得上因果；但写法须有画面感与文学气，"
+    "禁止「谁做了什么」式流水陈述、说明文腔与「然后/接着/于是」式事件罗列。"
+    "以场景切入：动作、对话、感官细节（光、声、气味、触感）与适量心理穿插并用，展示代替告知（show, don't tell）。"
+    "句式长短错落，对话带人物口吻与潜台词；可适度比喻、通感或留白，点到即止，"
+    "勿大段静态铺陈、象征性抒情或「仿佛/宛如/恰似」连篇。"
+    "每小节落实汇编事件链，禁止跳过转折；至少两处引号对话；环境描写服务情绪、紧贴情节，不写与事件无关的空景。"
 )
 _PROSE_SECTION_STYLE_EN = (
     "Avoid flat summary narration; each section needs at least two quoted dialogue beats, "
@@ -73,11 +73,12 @@ _PROSE_SECTION_STYLE_EN = (
     "vary sentence rhythm; show don't tell—no 'and then… and then…' event lists."
 )
 _PROSE_SECTION_STYLE_TYPIFIED_EN = (
-    "STORY-FIRST (typified mode): drive each section with plot beats and conflict from the outline; "
-    "every paragraph must advance an action, choice, or consequence—no skipped turning points. "
-    "Dialogue must move information or conflict forward; keep setting brief and tied to action. "
-    "Avoid lyric padding, extended metaphor chains, and mood-only paragraphs without events. "
-    "Prefer clear verbs and readable pacing over ornate prose; at least two quoted lines per section."
+    "BALANCED TYPIFIED NARRATION: plot and conflict stay clear, but prose must feel vivid and literary—"
+    "no flat reportage, no 'and then… and then…' event lists or expository telling. "
+    "Open scenes with action, dialogue, selective sensory detail, and brief interior beats; show, don't tell. "
+    "Vary sentence rhythm; dialogue carries voice and subtext. Metaphor and atmosphere are welcome in moderation—"
+    "no extended lyric padding, mood-only paragraphs, or chains of similes. "
+    "Honor every outline beat; at least two quoted lines per section; setting serves emotion and stays tied to the scene."
 )
 
 
@@ -2496,21 +2497,21 @@ def expand_prose(
     prose_min, prose_max = _prose_length_budget(n_sec)
     max_tokens = _expand_prose_max_tokens(prose_max)
     typified = (persona_pool or "function") == "genre"
-    temp = 0.76 if typified else 0.82
+    temp = 0.79 if typified else 0.82
     if lang == "en":
         style_block = _PROSE_SECTION_STYLE_TYPIFIED_EN if typified else _PROSE_SECTION_STYLE_EN
         if typified:
             system = (
-                "You are a fiction writer focused on clear, engaging storytelling. Expand the beat compilation into "
-                "readable prose where plot and conflict stay in the foreground. "
+                "You are a skilled fiction writer. Expand the beat compilation into prose that balances "
+                "clear plot progression with vivid, literary scene work—not flat summary narration. "
                 "Follow the outline's event chain beat by beat; do not skip or soften turning points. "
-                "Every paragraph should advance action, dialogue, or a character choice with visible consequences. "
-                "Keep setting brief and functional; avoid lyric padding, metaphor chains, and mood-only passages. "
-                "Dialogue must move the story forward—no empty small talk. "
+                "Every paragraph should advance action, dialogue, or choice through concrete scenes: "
+                "sensory detail, character voice, and brief interior beats—not bare statements of fact. "
+                "Avoid reportage, expository telling, and empty lyric padding alike. "
                 f"Aim for roughly {prose_min}–{prose_max} words total ({n_sec} sections × "
                 f"{PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words each). "
                 f"Each section must reach at least {PROSE_CHARS_PER_SECTION_MIN} words; "
-                f"expand with plot beats, dialogue, and action—not padding. "
+                f"expand with scene work, dialogue, and interior beats—not padding or event lists. "
                 f"Do not fall below {prose_min} words for the full piece. "
                 + style_block
                 + " "
@@ -2550,7 +2551,8 @@ def expand_prose(
         user += f"Beat compilation ({n_sec} sections):\n{bc}\n\n"
         if typified:
             user += (
-                "Typified mode: prioritize plot beats and readable pacing over lyric description.\n"
+                "Typified mode: keep plot beats clear while writing with scene, voice, and atmosphere—"
+                "avoid both flat reportage and ornate lyric padding.\n"
             )
         user += (
             "Write title and prose entirely in English even if the beat compilation contains other languages.\n"
@@ -2560,16 +2562,15 @@ def expand_prose(
         style_block = _PROSE_SECTION_STYLE_TYPIFIED_ZH if typified else _PROSE_SECTION_STYLE_ZH
         if typified:
             system = (
-                "你是中文小说作者，擅长把纲要扩写为**情节清楚、可读性强**的长叙事。"
+                "你是中文小说作者，擅长把纲要扩写为**情节清楚、写法有文学感**的长叙事："
+                "因果链让读者跟得上，但禁止平铺直叙、说明文腔与「谁做了什么」式流水账。"
+                "以场景切入，动作、对话、感官细节与适量心理交织，展示代替告知；"
+                "对话带人物口吻与潜台词，句式长短错落，可适度比喻/留白，点到即止。"
                 "以汇编中的核心事件链为主线，按小节顺序逐条落实，禁止跳过或弱化已定转折。"
-                "每段至少推进一个动作、对话或抉择，并写出可见后果；因果链必须让读者跟得上。"
-                "对话须推动信息、冲突或关系变化，禁止空泛寒暄与独白式抒情。"
-                "环境描写一笔带过、紧贴动作，禁止大段静态铺陈、象征性抒情与华丽比喻堆砌。"
-                "禁止「仿佛/宛如/恰似」连篇与空洞哲思句；少用排比与形容词堆叠，多用动词与具体细节。"
                 f"总篇幅目标约 {prose_min}～{prose_max} 字（共 {n_sec} 个小节，每节约 "
                 f"{PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字）；"
                 f"每节不得少于 {PROSE_CHARS_PER_SECTION_MIN} 字，全文不得少于 {prose_min} 字；"
-                f"用动作、对话与情节细节充实篇幅，禁止无效重复与空洞注水。"
+                f"用场景、对话、心理与感官细节写足各节，避免无效重复、空洞抒情与事件罗列。"
                 + style_block
                 + "严格遵守人物称谓与设定清单。"
                 "【输出格式】只输出一个 JSON 对象，不要 Markdown 代码围栏；键名固定为："
@@ -2610,7 +2611,7 @@ def expand_prose(
             user += f"【前文摘录】\n{rag_excerpt}\n\n"
         user += f"小节汇编（共 {n_sec} 节）：\n{bc}\n\n"
         if typified:
-            user += "【类型化扩写】优先落实各节核心事件与冲突，减少辞藻堆砌与空洞抒情。\n"
+            user += "【类型化扩写】情节优先，兼顾场景质感、人物口吻与适度文学表达；避免流水账，亦避免辞藻堆砌。\n"
         user += "请输出上述 JSON。"
     raw = (complete_chat(cfg, system, user, temperature=temp, max_tokens=max_tokens, retry_attempts=8, retry_pause=3.0) or "").strip()
     title, prose = _finalize_expanded_prose(raw)
@@ -2621,7 +2622,8 @@ def expand_prose(
                 user
                 + f"\n\n[LENGTH REWRITE] The draft below is only ~{body_chars} words, below the target "
                 f"{prose_min}–{prose_max}. Rewrite and expand the FULL piece while keeping the same plot beats, "
-                f"characters, and section order. Each section needs at least {PROSE_CHARS_PER_SECTION_MIN} words.\n"
+                f"characters, and section order. Each section needs at least {PROSE_CHARS_PER_SECTION_MIN} words; "
+                f"use scene work, dialogue, and sensory detail—not flat reportage or padding.\n"
                 f"--- DRAFT ---\n{prose[:14000]}\n--- END ---\n"
                 "Return JSON with title and the complete expanded prose."
             )
@@ -2630,7 +2632,8 @@ def expand_prose(
                 user
                 + f"\n\n【篇幅不足·重写扩写】下列初稿仅约 {body_chars} 字，低于目标 {prose_min}～{prose_max} 字。"
                 f"请在保留相同情节链、人物称谓与小节顺序的前提下，重写并充分扩写全文；"
-                f"每节至少 {PROSE_CHARS_PER_SECTION_MIN} 字，用动作、对话与情节细节充实。\n"
+                f"每节至少 {PROSE_CHARS_PER_SECTION_MIN} 字，用场景、对话、心理与感官细节充实，"
+                f"保持文学语感，避免平铺直叙与空洞注水。\n"
                 f"--- 初稿 ---\n{prose[:14000]}\n--- 结束 ---\n"
                 "请输出完整 JSON（title + 扩写后的完整 prose，不要只返回新增片段）。"
             )
