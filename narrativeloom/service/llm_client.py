@@ -62,11 +62,10 @@ _PROSE_SECTION_STYLE_ZH = (
 _PROSE_SECTION_STYLE_TYPIFIED_ZH = (
     "【类型化·均衡叙事】情节与冲突仍是主线，读者能跟得上因果；写法须有画面感与适度文学气，"
     "禁止「谁做了什么」式流水陈述、说明文腔与「然后/接着/于是」式事件罗列。"
-    "以场景切入：动作、对话、感官细节（光、声、气味、触感）与短段心理/内心独白交织，展示代替告知（show, don't tell）。"
-    "句式长短错落——可穿插诗性长句与警策短句；对话带人物口吻与潜台词；"
-    "可适度运用比喻、通感、象征与留白，意象具体可感，点到即止，"
-    "勿大段静态铺陈、象征性抒情或「仿佛/宛如/恰似」连篇。"
-    "每小节落实汇编事件链，禁止跳过转折；至少两处引号对话；环境描写服务情绪与主题、紧贴情节。"
+    "以场景切入：动作、对话、感官细节（光、声、气味、触感）与心理穿插并用，展示代替告知（show, don't tell）。"
+    "句式长短错落，对话带人物口吻与潜台词；可适度运用比喻、通感、象征与留白，意象具体可感，"
+    "让场景有呼吸感与张力，偶用诗性短句点缀，勿大段静态铺陈、象征性抒情或「仿佛/宛如/恰似」连篇。"
+    "每小节落实汇编事件链，禁止跳过转折；至少两处引号对话；环境描写服务情绪、紧贴情节，不写与事件无关的空景。"
 )
 _PROSE_SECTION_STYLE_EN = (
     "Avoid flat summary narration; each section needs at least two quoted dialogue beats, "
@@ -74,12 +73,13 @@ _PROSE_SECTION_STYLE_EN = (
     "vary sentence rhythm; show don't tell—no 'and then… and then…' event lists."
 )
 _PROSE_SECTION_STYLE_TYPIFIED_EN = (
-    "BALANCED TYPIFIED NARRATION: plot and conflict stay clear, but prose should read with vivid, slightly literary texture—"
+    "BALANCED TYPIFIED NARRATION: plot and conflict stay clear, but prose should read vivid and lightly literary—"
     "no flat reportage, no 'and then… and then…' event lists or expository telling. "
-    "Open scenes with action, dialogue, selective sensory detail, and brief interior monologue; show, don't tell. "
-    "Vary rhythm with lyrical long lines against sharp short beats; dialogue carries voice and subtext. "
-    "Use metaphor, synesthesia, symbol, and white space in moderation—concrete imagery, no extended lyric padding or simile chains. "
-    "Honor every outline beat; at least two quoted lines per section; setting serves emotion and theme while staying tied to the scene."
+    "Open scenes with action, dialogue, sensory detail, and brief interior beats; show, don't tell. "
+    "Vary sentence rhythm; dialogue carries voice and subtext. Use concrete imagery, metaphor, and atmosphere "
+    "in moderation—occasional lyrical lines are fine when they serve emotion and theme; "
+    "no extended lyric padding, mood-only paragraphs, or chains of similes. "
+    "Honor every outline beat; at least two quoted lines per section; setting serves emotion and stays tied to the scene."
 )
 
 
@@ -891,14 +891,10 @@ def generate_typified_beat(
     locked = merge_unique_names(
         [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
         preset,
+        extract_seed_cast_names(seed),
     )
-    if beat_index <= 0 and character_target_total is not None:
-        char_target = max(2, int(character_target_total))
-        locked = merge_unique_names(preset, locked, extract_seed_cast_names(seed))[:char_target]
-    else:
-        locked = merge_unique_names(locked, extract_seed_cast_names(seed))
-        char_target = max(2, int(character_target_total or max(2, len(locked))))
     locked_txt = ", ".join(locked) if locked and lang == "en" else ("、".join(locked) if locked else "")
+    char_target = max(2, int(character_target_total or max(2, len(locked))))
     cast_focus = typified_cast_focus(genre_name, lang)
     extra_slots = max(0, char_target - len(locked))
     char_spec_en = f"exactly {char_target} lines"
@@ -1153,7 +1149,6 @@ def generate_typified_beat(
         prior_characters_block=prior_characters_block,
         strict_narrative_allowlist=False,
         require_narrative_grounding=False,
-        enforce_wizard_target=beat_index <= 0,
         max_characters=8,
         lang=lang,
     )
@@ -1193,17 +1188,13 @@ def _coerce_unified_plan_variants(
 ) -> List[Dict[str, Any]]:
     locked = merge_unique_names(
         [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
+        extract_seed_cast_names(seed),
     )
-    if beat_index <= 0 and character_target_total is not None:
-        sculpt_target = max(2, int(character_target_total))
-        locked = merge_unique_names(locked, extract_seed_cast_names(seed))[:sculpt_target]
-    else:
-        locked = merge_unique_names(locked, extract_seed_cast_names(seed))
-        sculpt_target = max(
-            2,
-            len(locked),
-            int(character_target_total) if character_target_total is not None else len(locked),
-        )
+    sculpt_target = max(
+        2,
+        len(locked),
+        int(character_target_total) if character_target_total is not None else len(locked),
+    )
     expanded: List[Dict[str, Any]] = []
     for item in variants:
         txt, pf = _normalize_unified_plan_item(item)
@@ -1236,28 +1227,16 @@ def _coerce_antitrope_variants(
     variants: list,
     *,
     plan_count: int,
-    baseline: str = "",
 ) -> List[Dict[str, Any]]:
     """反套路全文大纲：不做职能分块规范化，仅清洗 JSON 泄漏。"""
-    from narrativeloom.utils.display_utils import (
-        integrate_antitrope_mutation_appendix,
-        normalize_mutation_marker_aliases,
-        repair_antitrope_outline,
-        strip_trailing_json_leak,
-        unescape_display_text,
-        _inject_section_headers_from_baseline,
-    )
+    from narrativeloom.utils.display_utils import normalize_mutation_marker_aliases, repair_antitrope_outline, strip_trailing_json_leak, unescape_display_text
 
     expanded: List[Dict[str, Any]] = []
-    base_ref = (baseline or "").strip()
     for item in variants:
         txt, pf = _normalize_unified_plan_item(item)
         txt = repair_antitrope_outline(strip_trailing_json_leak(unescape_display_text(txt))).strip()
         if txt:
             txt = normalize_mutation_marker_aliases(txt).strip()
-            txt = integrate_antitrope_mutation_appendix(txt, base_ref)
-            if base_ref and "###" in base_ref:
-                txt = _inject_section_headers_from_baseline(txt, base_ref)
             expanded.append({"outline": txt, "process_feedback": pf})
         else:
             expanded.append({"outline": "", "process_feedback": pf})
@@ -1778,7 +1757,6 @@ def generate_antitrope_full_story(
             "你是反套路创意师。只输出 JSON。"
             f"返回 {variant_count} 个 variant，每个 variant.outline 为完整多小节大纲替换稿，"
             "保留原有小节/分块结构；须完整保留输入中的 ### **小节 n** 标题行（不得删除或合并）；"
-            "在原有各【职能名】分块内直接改写要点并标记突变，禁止在文末追加「突变标记：小节…」独立段落；"
             "仅对突变处用 "
             f"{_MUT_OPEN}…{_MUT_CLOSE} 包裹（未改处不要标记）。"
             f"每版至少 5 处突变，须分布在不同小节或职能分块；"
@@ -1805,7 +1783,7 @@ def generate_antitrope_full_story(
         frag0, _ = _functional_normalize_fragment(raw)
         if frag0.strip():
             variants = [{"outline": frag0}]
-    coerced = _coerce_antitrope_variants(variants, plan_count=variant_count, baseline=base)
+    coerced = _coerce_antitrope_variants(variants, plan_count=variant_count)
     return {"variants": coerced}
 
 
@@ -2084,9 +2062,9 @@ def generate_antitrope_upgrade_variants(
             "必须返回 {\"variants\": [ {...}, {...}, {...} ]}，恰好三个对象。"
             "每个 variant.fragment 是「当前节拍拼接槽」的唯一替换全文（不是让各职能重新生成）。"
             "必须保留输入中每一个【职能名】分块标题及顺序，分块内「- 」要点行；"
-            "在槽位全文各职能分块内做反套路突变并标记，禁止在文末追加「突变标记：小节…」附录；"
+            "在槽位全文上做反套路创意突变，绝对避免俗套；须与已定前文因果一致。"
             f"突变处须用 {_MUT_OPEN}…{_MUT_CLOSE} 包裹以便界面高亮；禁止只输出裸 ⟦⟧ 箭头。"
-            "三份候选须分别对应：A颠覆因果预期、B动机反转、C类型/氛围错位，角度明显不同。禁止把 JSON 嵌进 fragment。"
+            "三份候选突变角度须明显不同。禁止把 JSON 嵌进 fragment。"
         )
         user = (
             f"创意种子：{seed}\n当前小节：{beat_title} — {beat_hint}\n\n"
@@ -2526,11 +2504,12 @@ def expand_prose(
         if typified:
             system = (
                 "You are a skilled literary fiction writer. Expand the beat compilation into prose that balances "
-                "clear plot progression with vivid, slightly literary scene work—not flat summary narration. "
+                "clear plot progression with vivid scene work and controlled literary style—not flat summary narration. "
                 "Follow the outline's event chain beat by beat; do not skip or soften turning points. "
                 "Every paragraph should advance action, dialogue, or choice through concrete scenes: "
-                "sensory detail, character voice, brief interior monologue, and controlled metaphor—not bare statements. "
-                "Let lyrical long lines alternate with sharp short beats; avoid reportage and empty lyric padding alike. "
+                "sensory detail, character voice, brief interior beats, and selective imagery—not bare statements of fact. "
+                "Allow moderate metaphor, rhythm, and atmosphere when they serve emotion and theme; "
+                "avoid reportage, expository telling, and empty lyric padding alike. "
                 f"Aim for roughly {prose_min}–{prose_max} words total ({n_sec} sections × "
                 f"{PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words each). "
                 f"Each section must reach at least {PROSE_CHARS_PER_SECTION_MIN} words; "
@@ -2585,11 +2564,11 @@ def expand_prose(
         style_block = _PROSE_SECTION_STYLE_TYPIFIED_ZH if typified else _PROSE_SECTION_STYLE_ZH
         if typified:
             system = (
-                "你是中文小说作者，擅长把纲要扩写为**情节清楚、文学性适中**的长叙事："
+                "你是中文小说作者，擅长把纲要扩写为**情节清楚、文学感适中**的长叙事："
                 "因果链让读者跟得上，但禁止平铺直叙、说明文腔与「谁做了什么」式流水账。"
-                "以场景切入，动作、对话、感官细节与短段心理/内心独白交织，展示代替告知；"
-                "句式长短错落，可穿插诗性长句与警策短句；对话带人物口吻与潜台词；"
-                "可适度运用比喻、通感、象征与留白，意象具体可感，文学性略高于平实报道、低于纯抒情堆砌。"
+                "以场景切入，动作、对话、感官细节与心理交织，展示代替告知；"
+                "对话带人物口吻与潜台词，句式长短错落；可适度运用比喻、通感、象征与留白，"
+                "意象具体可感，让场景有呼吸感与张力，偶用诗性短句点缀，避免堆砌辞藻或空洞抒情。"
                 "以汇编中的核心事件链为主线，按小节顺序逐条落实，禁止跳过或弱化已定转折。"
                 f"总篇幅目标约 {prose_min}～{prose_max} 字（共 {n_sec} 个小节，每节约 "
                 f"{PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字）；"
@@ -2635,7 +2614,7 @@ def expand_prose(
             user += f"【前文摘录】\n{rag_excerpt}\n\n"
         user += f"小节汇编（共 {n_sec} 节）：\n{bc}\n\n"
         if typified:
-            user += "【类型化扩写】情节优先，文学性略强：兼顾场景质感、人物口吻与适度意象表达；避免流水账，亦避免辞藻堆砌。\n"
+            user += "【类型化扩写】情节优先，适度增强文学质感（比喻、感官、潜台词与场景张力）；避免流水账，亦避免辞藻堆砌。\n"
         user += "请输出上述 JSON。"
     raw = (complete_chat(cfg, system, user, temperature=temp, max_tokens=max_tokens, retry_attempts=8, retry_pause=3.0) or "").strip()
     title, prose = _finalize_expanded_prose(raw)
