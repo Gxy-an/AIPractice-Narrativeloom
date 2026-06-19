@@ -996,8 +996,9 @@ def _generate_beat_candidates(
             idx, llm_cfg, feedback_process, canon, rag, labels, lg, fn_roles
         )
         fn_role_names = [r for r, _ in fn_roles]
-        locked_chars = _locked_for_char_target(idx, lg, char_target)
+        char_target = int(st.session_state.get(f"_fc_char_target_{idx}") or _resolve_functional_char_target(idx, lg))
         char_target = _effective_char_target(idx, char_target, len(_locked_character_names(idx, lg)))
+        locked_chars = _locked_for_char_target(idx, lg, char_target)
         from narrativeloom.utils.display_utils import parse_character_profile_map
 
         prior_profiles = parse_character_profile_map(
