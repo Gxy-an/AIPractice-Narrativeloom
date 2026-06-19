@@ -276,6 +276,7 @@ def render_typified_carousel(
     locked_character_names: Optional[List[str]] = None,
     character_target_total: int = 2,
     renormalize_on_render: bool = False,
+    opening_beat: bool = False,
     seed: str = "",
     prior_characters_block: str = "",
 ) -> str:
@@ -285,7 +286,9 @@ def render_typified_carousel(
     display_candidates = candidates
     if renormalize_on_render:
         locked = list(locked_character_names or [])
-        target = max(2, int(character_target_total or 2), len(locked))
+        target = max(2, int(character_target_total or 2))
+        if not opening_beat:
+            target = max(target, len(locked))
         renormed: List[Tuple[str, Dict[str, Any]]] = []
         for name, data in candidates:
             item = dict(data)
@@ -299,6 +302,7 @@ def render_typified_carousel(
                 prior_characters_block=prior_characters_block,
                 strict_narrative_allowlist=False,
                 require_narrative_grounding=False,
+                enforce_wizard_target=opening_beat,
                 max_characters=8,
                 lang=lg,
             )

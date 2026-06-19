@@ -891,10 +891,14 @@ def generate_typified_beat(
     locked = merge_unique_names(
         [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
         preset,
-        extract_seed_cast_names(seed),
     )
+    if beat_index <= 0 and character_target_total is not None:
+        char_target = max(2, int(character_target_total))
+        locked = merge_unique_names(preset, locked, extract_seed_cast_names(seed))[:char_target]
+    else:
+        locked = merge_unique_names(locked, extract_seed_cast_names(seed))
+        char_target = max(2, int(character_target_total or max(2, len(locked))))
     locked_txt = ", ".join(locked) if locked and lang == "en" else ("、".join(locked) if locked else "")
-    char_target = max(2, int(character_target_total or max(2, len(locked))))
     cast_focus = typified_cast_focus(genre_name, lang)
     extra_slots = max(0, char_target - len(locked))
     char_spec_en = f"exactly {char_target} lines"
@@ -1149,6 +1153,7 @@ def generate_typified_beat(
         prior_characters_block=prior_characters_block,
         strict_narrative_allowlist=False,
         require_narrative_grounding=False,
+        enforce_wizard_target=beat_index <= 0,
         max_characters=8,
         lang=lang,
     )
@@ -1188,13 +1193,17 @@ def _coerce_unified_plan_variants(
 ) -> List[Dict[str, Any]]:
     locked = merge_unique_names(
         [n.strip() for n in (locked_character_names or []) if (n or "").strip()],
-        extract_seed_cast_names(seed),
     )
-    sculpt_target = max(
-        2,
-        len(locked),
-        int(character_target_total) if character_target_total is not None else len(locked),
-    )
+    if beat_index <= 0 and character_target_total is not None:
+        sculpt_target = max(2, int(character_target_total))
+        locked = merge_unique_names(locked, extract_seed_cast_names(seed))[:sculpt_target]
+    else:
+        locked = merge_unique_names(locked, extract_seed_cast_names(seed))
+        sculpt_target = max(
+            2,
+            len(locked),
+            int(character_target_total) if character_target_total is not None else len(locked),
+        )
     expanded: List[Dict[str, Any]] = []
     for item in variants:
         txt, pf = _normalize_unified_plan_item(item)

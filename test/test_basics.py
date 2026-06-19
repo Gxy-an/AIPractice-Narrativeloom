@@ -1234,6 +1234,27 @@ def test_functional_outline_no_ellipsis_on_long_sentences():
     assert "朱棣命太医" in out or "太医" in out
 
 
+def test_sanitize_typified_enforce_wizard_target_caps_opening_cast():
+    from narrativeloom.utils.display_utils import sanitize_typified_characters
+
+    raw = (
+        "- 李明：主角\n"
+        "- 王芳：同伴\n"
+        "- 张三：多余\n"
+        "- 赵四：多余\n"
+    )
+    out = sanitize_typified_characters(
+        raw,
+        target=2,
+        locked_names=["李明", "王芳", "张三"],
+        enforce_wizard_target=True,
+        require_narrative_grounding=False,
+    )
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    assert len(lines) == 2
+    assert "张三" not in out and "赵四" not in out
+
+
 def test_prose_length_budget_scales_by_section():
     from narrativeloom.service.llm_client import (
         PROSE_CHARS_PER_SECTION_MAX,

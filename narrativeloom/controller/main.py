@@ -326,6 +326,31 @@ def _locked_character_names(beat_idx: int, lg: str) -> List[str]:
     return filtered
 
 
+def _opening_char_target(pool: str) -> int:
+    key = "typ_story_char_total" if pool == "genre" else "fn_story_char_total"
+    return max(2, int(st.session_state.get(key) or 2))
+
+
+def _effective_char_target(beat_idx: int, char_target: int, locked_count: int) -> int:
+    """开篇仅用设定人数；后续小节不得低于前文锁定人数。"""
+    target = max(2, int(char_target))
+    if beat_idx <= 0:
+        return target
+    return max(target, locked_count, 2)
+
+
+def _locked_for_char_target(beat_idx: int, lg: str, char_target: int) -> List[str]:
+    """开篇锁定名单截断至目标人数（预设主角优先），避免种子解析自动加人。"""
+    locked = _locked_character_names(beat_idx, lg)
+    if beat_idx > 0:
+        return locked
+    from narrativeloom.domain.character_names import merge_unique_names
+
+    preset = list(st.session_state.get("preset_protagonist_names") or [])
+    ordered = merge_unique_names(preset, locked)
+    return ordered[: max(2, int(char_target))]
+
+
 def _prior_beat_char_target(beat_idx: int, pool: str) -> int:
     """上一小节确认/使用的人物目标数（后续小节下限参考）。"""
     if beat_idx <= 0:
@@ -381,20 +406,18 @@ def _arc_char_growth(beat_idx: int, n_sections: int, base: int, max_cap: int) ->
 
 def _default_character_target(beat_idx: int, lg: str) -> int:
     """功能化：基线来自向导或上一小节，且覆盖前文锁定人物。"""
-    locked = _locked_character_names(beat_idx, lg)
     if beat_idx <= 0:
-        base = int(st.session_state.get("fn_story_char_total") or 2)
-        return min(14, max(base, len(locked), 2))
+        return min(14, _opening_char_target("function"))
+    locked = _locked_character_names(beat_idx, lg)
     prev_target = _prior_beat_char_target(beat_idx, "function")
     return min(14, max(prev_target, len(locked), 2))
 
 
 def _default_typified_character_target(beat_idx: int, lg: str) -> int:
-    """类型化：基线来自向导或上一小节，且覆盖种子与前文锁定人物。"""
-    locked = _locked_character_names(beat_idx, lg)
+    """类型化：基线来自向导或上一小节，且覆盖前文锁定人物。"""
     if beat_idx <= 0:
-        base = int(st.session_state.get("typ_story_char_total") or 2)
-        return min(8, max(base, len(locked), 2))
+        return min(8, _opening_char_target("genre"))
+    locked = _locked_character_names(beat_idx, lg)
     prev_target = _prior_beat_char_target(beat_idx, "genre")
     return min(8, max(prev_target, len(locked), 2))
 
@@ -445,8 +468,8 @@ def _renormalize_functional_variants(
     """按目标人数二次规范化功能化总体方案（不重调 LLM）。"""
     from narrativeloom.utils.display_utils import normalize_single_unified_outline, parse_character_profile_map
 
-    locked = _locked_character_names(beat_idx, lg)
-    target = max(int(char_target), len(locked), 2)
+    locked = _locked_for_char_target(beat_idx, lg, char_target)
+    target = _effective_char_target(beat_idx, char_target, len(_locked_character_names(beat_idx, lg)))
     prior_profiles = parse_character_profile_map(_prior_characters_block(beat_idx, labels, lg))
     roles = role_names or []
     out: List[Dict[str, Any]] = []
@@ -496,8 +519,8 @@ def _resanitize_typified_candidates(
     """按目标人数二次规范化各题材候选，确保卡片与存储一致。"""
     from narrativeloom.utils.display_utils import sanitize_typified_characters
 
-    locked = _locked_character_names(beat_idx, lg)
-    target = max(int(char_target), len(locked), 2)
+    locked = _locked_for_char_target(beat_idx, lg, char_target)
+    target = _effective_char_target(beat_idx, char_target, len(_locked_character_names(beat_idx, lg)))
     prior = _prior_characters_block(beat_idx, labels, lg) if beat_idx > 0 else ""
     seed = st.session_state.get("seed") or ""
     out: List[Tuple[str, Dict[str, Any]]] = []
@@ -513,6 +536,7 @@ def _resanitize_typified_candidates(
             prior_characters_block=prior,
             strict_narrative_allowlist=False,
             require_narrative_grounding=False,
+            enforce_wizard_target=beat_idx <= 0,
             max_characters=8,
             lang=lg,
         )
@@ -754,13 +778,14 @@ def _parallel_typified(
     seed = st.session_state.seed
     title, hint = labels[beat_idx]
     prior = _prior_summary(beat_idx, labels, lang)
-    locked_chars = _locked_character_names(beat_idx, lang)
+    locked_chars = _locked_for_char_target(beat_idx, lang, char_target or _resolve_typified_char_target(beat_idx, lang))
+    if char_target is None:
+        char_target = _effective_char_target(beat_idx, _resolve_typified_char_target(beat_idx, lang), len(locked_chars))
+    else:
+        char_target = _effective_char_target(beat_idx, int(char_target), len(_locked_character_names(beat_idx, lang)))
+        locked_chars = _locked_for_char_target(beat_idx, lang, char_target)
     preset = list(st.session_state.get("preset_protagonist_names") or [])
     prior_chars = _prior_characters_block(beat_idx, labels, lang) if beat_idx > 0 else ""
-    if char_target is None:
-        char_target = max(_resolve_typified_char_target(beat_idx, lang), len(locked_chars), 2)
-    else:
-        char_target = max(int(char_target), len(locked_chars), 2)
     _apply_typified_char_target(beat_idx, char_target)
     personas = get_typified_personas(lang)
     if TYPIFIED_GEN_COUNT > 0:
@@ -835,9 +860,9 @@ def _generate_unified_functional(
 ) -> Dict[str, Any]:
     title, hint = labels[beat_idx]
     prior = _prior_summary(beat_idx, labels, lang)
-    locked_chars = _locked_character_names(beat_idx, lang)
     char_target = _resolve_functional_char_target(beat_idx, lang)
-    char_target = max(2, char_target, len(locked_chars))
+    char_target = _effective_char_target(beat_idx, char_target, len(_locked_character_names(beat_idx, lang)))
+    locked_chars = _locked_for_char_target(beat_idx, lang, char_target)
     st.session_state[f"_fc_char_target_{beat_idx}"] = char_target
     prior_texts = [_beat_to_text(st.session_state.beats[i], lang) for i in range(beat_idx)]
     digest = prior_beats_repetition_digest(prior_texts)
@@ -934,7 +959,8 @@ def _generate_beat_candidates(
 ) -> None:
     """并行生成当前小节候选（类型化或功能化）。"""
     if pool == "genre":
-        char_target = max(_resolve_typified_char_target(idx, lg), len(_locked_character_names(idx, lg)), 2)
+        char_target = _resolve_typified_char_target(idx, lg)
+        char_target = _effective_char_target(idx, char_target, len(_locked_character_names(idx, lg)))
         _apply_typified_char_target(idx, char_target)
         raw_candidates = _parallel_typified(
             idx,
@@ -970,12 +996,8 @@ def _generate_beat_candidates(
             idx, llm_cfg, feedback_process, canon, rag, labels, lg, fn_roles
         )
         fn_role_names = [r for r, _ in fn_roles]
-        locked_chars = _locked_character_names(idx, lg)
-        char_target = max(
-            2,
-            _resolve_functional_char_target(idx, lg),
-            len(locked_chars),
-        )
+        locked_chars = _locked_for_char_target(idx, lg, char_target)
+        char_target = _effective_char_target(idx, char_target, len(_locked_character_names(idx, lg)))
         from narrativeloom.utils.display_utils import parse_character_profile_map
 
         prior_profiles = parse_character_profile_map(
@@ -1935,8 +1957,10 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
 
                 elif pool == "genre" and typ_ready:
                     locked_chars = _locked_character_names(idx, lg)
-                    char_min = max(2, len(locked_chars))
-                    if idx > 0:
+                    if idx == 0:
+                        char_min = 2
+                    else:
+                        char_min = max(2, len(locked_chars))
                         char_min = max(char_min, _prior_beat_char_target(idx, "genre"))
                     char_default = _default_typified_character_target(idx, lg)
                     if f"typ_char_total_{idx}" not in st.session_state:
@@ -1961,14 +1985,16 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         st.session_state.typ_story_char_total = live_char_target
                         _kickoff_beat_generation(idx, "genre", char_target=live_char_target)
                     lookup = {nm: d for nm, d in st.session_state.typified_candidates}
+                    display_locked = _locked_for_char_target(idx, lg, live_char_target)
                     sel = render_typified_carousel(
                         lg,
                         idx,
                         st.session_state.typified_candidates,
                         feedback_renderer=_render_process_feedback,
-                        locked_character_names=locked_chars,
+                        locked_character_names=display_locked,
                         character_target_total=live_char_target,
                         renormalize_on_render=True,
+                        opening_beat=idx <= 0,
                         seed=st.session_state.get("seed") or "",
                         prior_characters_block=_prior_characters_block(idx, labels, lg),
                     )
@@ -2021,8 +2047,10 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         _sort_roles(list(st.session_state.get(f"fn_multi_{idx}", role_order))),
                         lg,
                     )
-                    char_min = max(1, len(locked_chars))
-                    if idx > 0:
+                    if idx == 0:
+                        char_min = 2
+                    else:
+                        char_min = max(1, len(locked_chars))
                         char_min = max(char_min, _prior_beat_char_target(idx, "function"))
                     char_default = _default_character_target(idx, lg)
                     if f"fn_char_total_{idx}" not in st.session_state:
@@ -2078,7 +2106,7 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         variants,
                         feedback_renderer=_render_process_feedback,
                         role_names=chosen_roles,
-                        locked_character_names=locked_chars,
+                        locked_character_names=_locked_for_char_target(idx, lg, live_char_target),
                         character_target_total=live_char_target,
                         renormalize_on_render=True,
                         seed=st.session_state.get("seed") or "",

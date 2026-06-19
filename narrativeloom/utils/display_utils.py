@@ -563,6 +563,7 @@ def sanitize_typified_characters(
     prior_characters_block: str = "",
     strict_narrative_allowlist: bool = False,
     require_narrative_grounding: bool = True,
+    enforce_wizard_target: bool = False,
     max_characters: int = 14,
     lang: str = "zh",
 ) -> str:
@@ -586,7 +587,12 @@ def sanitize_typified_characters(
     locked = merge_unique_names(list(locked_names or []))
     prior_profiles = parse_character_profile_map(prior_characters_block)
     cap = max(2, min(int(max_characters), 14))
-    target = max(2, len(locked), min(int(target), cap))
+    if enforce_wizard_target:
+        target = max(2, min(int(target), cap))
+        if len(locked) > target:
+            locked = locked[:target]
+    else:
+        target = max(2, len(locked), min(int(target), cap))
     plot_allowlist = _build_sculptor_allowlist(
         seed=seed,
         locked_names=locked,
@@ -613,6 +619,8 @@ def sanitize_typified_characters(
             raw_name == lk or lk.startswith(raw_name) or raw_name.startswith(lk)
             for lk in locked
         )
+        if enforce_wizard_target and len(kept) >= target and not is_locked:
+            return
         if is_locked:
             n = canonicalize_to_locked_name(raw_name, locked) or raw_name
         else:
@@ -684,33 +692,36 @@ def sanitize_typified_characters(
     fill_sources.sort(key=lambda n: _rank_supplementary_cast_name(n, narrative=plot_context))
     fill_sources = _drop_substring_cast_duplicates(fill_sources)
     fill_idx = 0
-    while len(cast_names) < target and fill_idx < len(fill_sources):
-        extra = fill_sources[fill_idx]
-        fill_idx += 1
-        if not extra or extra in cast_names:
-            continue
-        before = len(kept)
-        _push(extra, "")
-        if len(kept) == before:
-            continue
-        cast_names = [n for n, _ in kept]
-    while len(cast_names) < target:
-        extra = _fallback_supplementary_name(
-            cast_names, full=context, seed=seed, narrative=plot_context
-        )
-        if not extra or extra in cast_names:
-            break
-        before = len(kept)
-        _push(extra, "")
-        if len(kept) == before:
-            break
-        cast_names = [n for n, _ in kept]
+    if not enforce_wizard_target:
+        while len(cast_names) < target and fill_idx < len(fill_sources):
+            extra = fill_sources[fill_idx]
+            fill_idx += 1
+            if not extra or extra in cast_names:
+                continue
+            before = len(kept)
+            _push(extra, "")
+            if len(kept) == before:
+                continue
+            cast_names = [n for n, _ in kept]
+        while len(cast_names) < target:
+            extra = _fallback_supplementary_name(
+                cast_names, full=context, seed=seed, narrative=plot_context
+            )
+            if not extra or extra in cast_names:
+                break
+            before = len(kept)
+            _push(extra, "")
+            if len(kept) == before:
+                break
+            cast_names = [n for n, _ in kept]
 
     locked_set = set(locked)
     locked_rows = [(n, d) for n, d in kept if n in locked_set]
     other_rows = [(n, d) for n, d in kept if n not in locked_set]
     merged_rows = locked_rows + other_rows
-    display_target = max(target, len(locked_rows))
+    if enforce_wizard_target:
+        merged_rows = merged_rows[:target]
+    display_target = target if enforce_wizard_target else max(target, len(locked_rows))
     lines = [f"- {n}：{d}" for n, d in merged_rows[:display_target]]
     return "\n".join(lines) if lines else raw
 
@@ -3230,13 +3241,19 @@ def normalize_single_unified_outline(
 
     locked = merge_unique_names(
         [n.strip() for n in (locked_names or []) if (n or "").strip()],
-        extract_seed_cast_names(seed),
     )
-    sculpt_target = max(
-        2,
-        len(locked),
-        int(character_target_total) if character_target_total is not None else len(locked),
-    )
+    if beat_index <= 0 and character_target_total is not None:
+        sculpt_target = max(2, int(character_target_total))
+        if len(locked) > sculpt_target:
+            locked = locked[:sculpt_target]
+        locked = merge_unique_names(locked, extract_seed_cast_names(seed))[:sculpt_target]
+    else:
+        locked = merge_unique_names(locked, extract_seed_cast_names(seed))
+        sculpt_target = max(
+            2,
+            len(locked),
+            int(character_target_total) if character_target_total is not None else len(locked),
+        )
     setting_cap = 120 if _is_en_lang(lang) else (40 if beat_index > 0 else 48)
     plot_cap = 180 if _is_en_lang(lang) else 48
     char_cap = 140 if _is_en_lang(lang) else 44
