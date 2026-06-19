@@ -1055,6 +1055,149 @@ def normalize_mutation_marker_aliases(text: str) -> str:
     return _normalize_bare_mutation_brackets(raw)
 
 
+_MUTATION_APPENDIX_HEAD = re.compile(
+    r"(?:^|\n)\s*(?:【)?突变标记[：:]\s*小节\s*(\d+)\s*([^\n【]+?)(?:】)?\s*\n",
+    re.I,
+)
+
+
+def _role_title_from_mutation_hint(hint: str) -> str:
+    h = (hint or "").strip().strip("】").strip("【").strip()
+    if not h:
+        return ""
+    aliases = (
+        ("设定构建", "【设定构建师】"),
+        ("Setting Architect", "【Setting Architect】"),
+        ("人物塑造", "【人物塑造师】"),
+        ("Character Sculptor", "【Character Sculptor】"),
+        ("剧情逻辑", "【剧情逻辑师】"),
+        ("Plot Logic", "【Plot Logic Designer】"),
+        ("冲突设计", "【冲突设计师】"),
+        ("Conflict Designer", "【Conflict Designer】"),
+        ("细节填充", "【细节填充师】"),
+        ("对话设计", "【对话设计师】"),
+        ("氛围营造", "【氛围营造师】"),
+    )
+    for needle, title in aliases:
+        if needle in h or h in needle:
+            return title
+    return f"【{h}】" if not h.startswith("【") else h
+
+
+def _wrap_mutation_clause(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return raw
+    if _MUT_OPEN in raw or "⟦" in raw:
+        return normalize_mutation_marker_aliases(raw)
+    bullet_m = re.match(r"^(\s*[-•·]\s*)(.+)$", raw)
+    if bullet_m:
+        return f"{bullet_m.group(1)}{_MUT_OPEN}{bullet_m.group(2).strip()}{_MUT_CLOSE}"
+    return f"{_MUT_OPEN}{raw}{_MUT_CLOSE}"
+
+
+def _inject_mutation_into_outline(
+    outline: str,
+    *,
+    section_num: int,
+    role_hint: str,
+    mutation_body: str,
+) -> str:
+    """将附录式突变块写回对应小节/职能分块内（非文末堆叠）。"""
+    role_title = _role_title_from_mutation_hint(role_hint)
+    if not role_title or not (mutation_body or "").strip():
+        return outline
+    sec_pat = re.compile(
+        rf"(^#{{1,3}}\s*\*{{0,2}}\s*(?:小节|Section)\s*{section_num}\b[^\n]*\n)",
+        re.I | re.M,
+    )
+    m = sec_pat.search(outline or "")
+    if not m:
+        return outline
+    sec_start = m.start()
+    next_sec = re.search(
+        r"^#{1,3}\s*\*{0,2}\s*(?:小节|Section)\s*\d+",
+        outline[m.end() :],
+        re.I | re.M,
+    )
+    sec_end = m.end() + next_sec.start() if next_sec else len(outline)
+    section_text = outline[sec_start:sec_end]
+    role_pat = re.compile(re.escape(role_title) + r"\s*\n", re.I)
+    rm = role_pat.search(section_text)
+    if not rm:
+        return outline
+    role_body_start = rm.end()
+    next_role = re.search(r"\n【[^】]+】\s*\n", section_text[role_body_start:])
+    role_body_end = role_body_start + (next_role.start() if next_role else len(section_text) - rm.start())
+    role_body = section_text[role_body_start:role_body_end].strip()
+    mut_lines = [
+        _wrap_mutation_clause(ln)
+        for ln in mutation_body.splitlines()
+        if ln.strip() and not _MUTATION_APPENDIX_HEAD.match(ln)
+    ]
+    if not mut_lines:
+        return outline
+    mut_core = strip_mutation_markers(mut_lines[0].lstrip("-•· ").strip())
+    replaced = False
+    new_role_lines: List[str] = []
+    for ln in role_body.splitlines():
+        s = ln.strip()
+        if not s:
+            new_role_lines.append(ln)
+            continue
+        core = strip_mutation_markers(re.sub(r"^[-•·]\s*", "", s))
+        if not replaced and mut_core and (
+            mut_core in core
+            or core in mut_core
+            or _line_similar_to_baseline(
+                _normalize_diff_line(mut_core),
+                {_normalize_diff_line(core)},
+                [core],
+            )
+        ):
+            new_role_lines.append(mut_lines[0])
+            replaced = True
+        else:
+            new_role_lines.append(ln)
+    if not replaced:
+        prefix = "- " if not mut_lines[0].lstrip().startswith("-") else ""
+        new_role_lines.append(prefix + mut_lines[0].lstrip("-•· "))
+    new_role_body = "\n".join(new_role_lines).strip()
+    new_section = (
+        section_text[:role_body_start]
+        + new_role_body
+        + ("\n" if new_role_body else "")
+        + section_text[role_body_end:]
+    )
+    return outline[:sec_start] + new_section + outline[sec_end:]
+
+
+def integrate_antitrope_mutation_appendix(outline: str, baseline: str = "") -> str:
+    """把模型误放在文末的「突变标记：小节…」块内联回原有职能分块。"""
+    text = normalize_mutation_marker_aliases((outline or "").strip())
+    if "突变标记" not in text:
+        return text
+    matches = list(_MUTATION_APPENDIX_HEAD.finditer(text))
+    if not matches:
+        return text
+    main_part = text[: matches[0].start()].strip()
+    base = main_part if len(main_part) >= 80 else (baseline or main_part).strip() or main_part
+    result = base
+    for idx, m in enumerate(matches):
+        sec_num = int(m.group(1))
+        role_hint = m.group(2)
+        body_start = m.end()
+        body_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+        body = text[body_start:body_end].strip()
+        result = _inject_mutation_into_outline(
+            result,
+            section_num=sec_num,
+            role_hint=role_hint,
+            mutation_body=body,
+        )
+    return result.strip()
+
+
 def _normalize_diff_line(ln: str) -> str:
     s = strip_mutation_markers((ln or "").strip())
     s = re.sub(r"^[-•·]\s*", "", s)
@@ -3219,11 +3362,24 @@ def normalize_single_unified_outline(
     beat_index: int = 0,
     seed: str = "",
     prior_character_profiles: Optional[Dict[str, str]] = None,
+    preserve_user_edits: bool = False,
 ) -> str:
     """清洗单份总体方案：截断杂糅、补全人物塑造师、规范分块。"""
     txt = scrub_functional_fragment(strip_trailing_json_leak(unescape_display_text(text)))
     if not txt:
         return ""
+    if preserve_user_edits:
+        txt = ensure_role_blocks_on_own_lines(txt, role_names)
+        txt = normalize_outline_role_headers(txt, role_names)
+        sections = parse_merge_role_sections(txt, role_names=role_names)
+        if not sections or sections[0][0] == "【全文】":
+            return txt.strip()
+        processed: List[Tuple[str, str]] = []
+        for title, body in sections:
+            if _is_continuity_section_title(title):
+                continue
+            processed.append((title, scrub_functional_fragment(body)))
+        return localize_functional_outline(rebuild_merge_sections(processed), lang=lang)
     if _looks_like_story_outline(txt):
         return txt.strip()
     txt = ensure_role_blocks_on_own_lines(txt, role_names)

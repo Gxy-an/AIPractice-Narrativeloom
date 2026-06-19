@@ -1268,3 +1268,50 @@ def test_prose_length_budget_scales_by_section():
     assert PROSE_CHARS_PER_SECTION_MIN >= 1000
     assert PROSE_CHARS_PER_SECTION_MAX > PROSE_CHARS_PER_SECTION_MIN
 
+
+def test_integrate_antitrope_mutation_appendix_inlines_role_block():
+    from narrativeloom.utils.display_utils import (
+        integrate_antitrope_mutation_appendix,
+        strip_mutation_markers,
+    )
+
+    baseline = (
+        "### **小节 1**\n"
+        "【设定构建师】\n"
+        "- 朱棣独自在殿中听雨。\n"
+        "【人物塑造师】\n"
+        "- 朱棣：目光锐利。\n"
+    )
+    appendix = (
+        baseline
+        + "\n突变标记：小节1 设定构建师\n"
+        "- 银锭上的部落纹章是他自己放的诱饵。\n"
+    )
+    merged = integrate_antitrope_mutation_appendix(appendix, baseline)
+    assert "突变标记" not in merged
+    assert "银锭上的部落纹章" in merged
+    assert "⟦mut⟧" in merged or "银锭" in strip_mutation_markers(merged)
+    assert merged.index("银锭") < len(baseline)
+
+
+def test_normalize_single_unified_outline_preserves_user_edits():
+    from narrativeloom.utils.display_utils import normalize_single_unified_outline
+
+    edited = (
+        "【人物塑造师】\n"
+        "- 张三：改名后的主角，仍要推进密信线。\n"
+        "【剧情逻辑师】\n"
+        "- 密信被截获，张三亲自审问。\n"
+    )
+    out = normalize_single_unified_outline(
+        edited,
+        role_names=["人物塑造师", "剧情逻辑师"],
+        locked_names=["李四", "王五"],
+        character_target_total=2,
+        beat_index=1,
+        preserve_user_edits=True,
+    )
+    assert "张三" in out
+    assert "改名后的主角" in out
+    assert "密信被截获" in out
+

@@ -1236,16 +1236,28 @@ def _coerce_antitrope_variants(
     variants: list,
     *,
     plan_count: int,
+    baseline: str = "",
 ) -> List[Dict[str, Any]]:
     """反套路全文大纲：不做职能分块规范化，仅清洗 JSON 泄漏。"""
-    from narrativeloom.utils.display_utils import normalize_mutation_marker_aliases, repair_antitrope_outline, strip_trailing_json_leak, unescape_display_text
+    from narrativeloom.utils.display_utils import (
+        integrate_antitrope_mutation_appendix,
+        normalize_mutation_marker_aliases,
+        repair_antitrope_outline,
+        strip_trailing_json_leak,
+        unescape_display_text,
+        _inject_section_headers_from_baseline,
+    )
 
     expanded: List[Dict[str, Any]] = []
+    base_ref = (baseline or "").strip()
     for item in variants:
         txt, pf = _normalize_unified_plan_item(item)
         txt = repair_antitrope_outline(strip_trailing_json_leak(unescape_display_text(txt))).strip()
         if txt:
             txt = normalize_mutation_marker_aliases(txt).strip()
+            txt = integrate_antitrope_mutation_appendix(txt, base_ref)
+            if base_ref and "###" in base_ref:
+                txt = _inject_section_headers_from_baseline(txt, base_ref)
             expanded.append({"outline": txt, "process_feedback": pf})
         else:
             expanded.append({"outline": "", "process_feedback": pf})
@@ -1766,6 +1778,7 @@ def generate_antitrope_full_story(
             "你是反套路创意师。只输出 JSON。"
             f"返回 {variant_count} 个 variant，每个 variant.outline 为完整多小节大纲替换稿，"
             "保留原有小节/分块结构；须完整保留输入中的 ### **小节 n** 标题行（不得删除或合并）；"
+            "在原有各【职能名】分块内直接改写要点并标记突变，禁止在文末追加「突变标记：小节…」独立段落；"
             "仅对突变处用 "
             f"{_MUT_OPEN}…{_MUT_CLOSE} 包裹（未改处不要标记）。"
             f"每版至少 5 处突变，须分布在不同小节或职能分块；"
@@ -1792,7 +1805,7 @@ def generate_antitrope_full_story(
         frag0, _ = _functional_normalize_fragment(raw)
         if frag0.strip():
             variants = [{"outline": frag0}]
-    coerced = _coerce_antitrope_variants(variants, plan_count=variant_count)
+    coerced = _coerce_antitrope_variants(variants, plan_count=variant_count, baseline=base)
     return {"variants": coerced}
 
 
@@ -2071,9 +2084,9 @@ def generate_antitrope_upgrade_variants(
             "必须返回 {\"variants\": [ {...}, {...}, {...} ]}，恰好三个对象。"
             "每个 variant.fragment 是「当前节拍拼接槽」的唯一替换全文（不是让各职能重新生成）。"
             "必须保留输入中每一个【职能名】分块标题及顺序，分块内「- 」要点行；"
-            "在槽位全文上做反套路创意突变，绝对避免俗套；须与已定前文因果一致。"
+            "在槽位全文各职能分块内做反套路突变并标记，禁止在文末追加「突变标记：小节…」附录；"
             f"突变处须用 {_MUT_OPEN}…{_MUT_CLOSE} 包裹以便界面高亮；禁止只输出裸 ⟦⟧ 箭头。"
-            "三份候选突变角度须明显不同。禁止把 JSON 嵌进 fragment。"
+            "三份候选须分别对应：A颠覆因果预期、B动机反转、C类型/氛围错位，角度明显不同。禁止把 JSON 嵌进 fragment。"
         )
         user = (
             f"创意种子：{seed}\n当前小节：{beat_title} — {beat_hint}\n\n"

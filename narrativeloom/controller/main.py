@@ -591,6 +591,9 @@ def _clear_typified_ui_keys(beat_idx: int) -> None:
         f"tw_set_{beat_idx}_",
         f"tw_ch_{beat_idx}_",
         f"tw_ev_{beat_idx}_",
+        f"_tw_src_set_{beat_idx}_",
+        f"_tw_src_ch_{beat_idx}_",
+        f"_tw_src_ev_{beat_idx}_",
     )
     for k in list(st.session_state.keys()):
         sk = str(k)
@@ -602,8 +605,48 @@ def _clear_typified_ui_keys(beat_idx: int) -> None:
         f"unified_plan_page_{beat_idx}",
         f"unified_plan_pick_{beat_idx}",
         f"merge_preview_{beat_idx}",
+        f"_merge_preview_base_{beat_idx}",
+        f"_merge_user_edited_{beat_idx}",
     ):
         st.session_state.pop(k, None)
+
+
+def _init_typified_edit_widget(
+    beat_idx: int,
+    sel: str,
+    suffix: str,
+    fresh: str,
+) -> None:
+    wkey = f"tw_{suffix}_{beat_idx}_{sel}"
+    src_key = f"_tw_src_{suffix}_{beat_idx}_{sel}"
+    if st.session_state.get(src_key) != fresh:
+        st.session_state[wkey] = fresh
+        st.session_state[src_key] = fresh
+
+
+def _functional_merge_user_edited(beat_idx: int) -> bool:
+    """当前小节拼接槽是否相对基准稿被用户改过。"""
+    merge_user_key = f"_merge_user_edited_{beat_idx}"
+    merge_base_key = f"_merge_preview_base_{beat_idx}"
+    preview_key = f"merge_preview_{beat_idx}"
+    if st.session_state.get(merge_user_key):
+        return True
+    current = (st.session_state.get(preview_key) or "").strip()
+    base = (st.session_state.get(merge_base_key) or "").strip()
+    return bool(base and current and current != base)
+
+
+def _mark_functional_merge_user_edited(beat_idx: int) -> None:
+    if _functional_merge_user_edited(beat_idx):
+        st.session_state[f"_merge_user_edited_{beat_idx}"] = True
+
+
+def _read_typified_edit_widgets(beat_idx: int, sel: str) -> Dict[str, str]:
+    return {
+        "setting": st.session_state.get(f"tw_set_{beat_idx}_{sel}", ""),
+        "characters": st.session_state.get(f"tw_ch_{beat_idx}_{sel}", ""),
+        "key_events": st.session_state.get(f"tw_ev_{beat_idx}_{sel}", ""),
+    }
 
 
 def _prior_characters_block(
@@ -1052,18 +1095,14 @@ def _process_pending_beat_confirm(
             ev = payload["key_events"]
             dsel = st.session_state.typified_snapshot.get(sel, {})
             snap = st.session_state.typified_snapshot.get(sel, {})
-            user_edited = 1 if (
-                s != snap.get("setting", "")
-                or ch != snap.get("characters", "")
-                or ev != snap.get("key_events", "")
-            ) else 0
+            user_edited = int(payload.get("user_edited", 0))
             reg = max(0, st.session_state.beat_regen_count[idx] - 1)
             st.session_state.beat_edit_events[idx] = user_edited + reg
             elapsed = max(0.0, time.time() - st.session_state.beat_start_ts)
             st.session_state.beat_times[idx] = round(elapsed, 2)
             beat_raw = {"setting": s, "characters": ch, "key_events": ev}
             reviewed = beat_raw
-            if feedback_process:
+            if feedback_process and not user_edited:
                 reviewed = review_beat_consistency(
                     llm_cfg,
                     canon_sheet=canon,
@@ -1071,26 +1110,35 @@ def _process_pending_beat_confirm(
                     beat=beat_raw,
                     lang=lg,
                 )
-            summary_line = (reviewed.get("setting") or "")[:80]
-            kv = reviewed.get("key_events", ev)
-            if not key_events_meaningful(coerce_display_text(kv)):
-                kv = ev
-            if not key_events_meaningful(coerce_display_text(kv)):
-                kv = coerce_display_text(dsel.get("key_events", ""))
-            norm_ev = key_events_to_bullets(kv)
-            if not (norm_ev or "").strip():
-                norm_ev = key_events_to_bullets(ev) or key_events_to_bullets(dsel.get("key_events", ""))
-            if not (norm_ev or "").strip():
-                norm_ev = coerce_display_text(kv)
+            summary_line = (reviewed.get("setting") or s or "")[:80]
+            if user_edited:
+                norm_ev = key_events_to_bullets(ev) or coerce_display_text(ev).strip()
+                final_setting = s
+                final_characters = ch
+                final_events = norm_ev or ev.strip()
+            else:
+                kv = reviewed.get("key_events", ev)
+                if not key_events_meaningful(coerce_display_text(kv)):
+                    kv = ev
+                if not key_events_meaningful(coerce_display_text(kv)):
+                    kv = coerce_display_text(dsel.get("key_events", ""))
+                norm_ev = key_events_to_bullets(kv)
+                if not (norm_ev or "").strip():
+                    norm_ev = key_events_to_bullets(ev) or key_events_to_bullets(dsel.get("key_events", ""))
+                if not (norm_ev or "").strip():
+                    norm_ev = coerce_display_text(kv)
+                final_setting = reviewed.get("setting", s)
+                final_characters = reviewed.get("characters", ch)
+                final_events = (norm_ev or ev).strip()
             st.session_state.beats[idx] = {
                 "mode": "typified",
                 "persona": sel,
-                "setting": reviewed.get("setting", s),
-                "characters": reviewed.get("characters", ch),
-                "key_events": (norm_ev or ev).strip(),
+                "setting": final_setting,
+                "characters": final_characters,
+                "key_events": final_events,
                 "summary_line": summary_line + ("…" if len(summary_line) >= 80 else ""),
                 "process_feedback": dsel.get("process_feedback"),
-                "review_notes": reviewed.get("review_notes", ""),
+                "review_notes": reviewed.get("review_notes", "") if not user_edited else "",
             }
         else:
             mt = (payload.get("merged_text") or "").strip()
@@ -1106,7 +1154,7 @@ def _process_pending_beat_confirm(
             st.session_state.beat_times[idx] = round(elapsed, 2)
             merged_final = mt
             rnote = ""
-            if feedback_process:
+            if feedback_process and not user_edited:
                 merged_final, rnote = review_merged_text(
                     llm_cfg,
                     canon_sheet=canon,
@@ -2001,37 +2049,56 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                     )
                     dsel = lookup[sel]
                     st.caption(f"{T('current_edit', lg)}: {sel}")
-                    s = st.text_area(
+                    snap = st.session_state.typified_snapshot.get(sel, {})
+                    _init_typified_edit_widget(
+                        idx, sel, "set",
+                        coerce_display_text(dsel.get("setting", "")),
+                    )
+                    _init_typified_edit_widget(
+                        idx, sel, "ch",
+                        coerce_display_text(dsel.get("characters", "")),
+                    )
+                    _init_typified_edit_widget(
+                        idx, sel, "ev",
+                        coerce_display_text(dsel.get("key_events", "")),
+                    )
+                    st.text_area(
                         T("location_setting", lg),
-                        value=coerce_display_text(dsel.get("setting", "")),
                         height=80,
                         key=f"tw_set_{idx}_{sel}",
                     )
-                    ch = st.text_area(
+                    st.text_area(
                         T("characters", lg),
-                        value=coerce_display_text(dsel.get("characters", "")),
                         height=80,
                         key=f"tw_ch_{idx}_{sel}",
                     )
-                    ev = st.text_area(
+                    st.text_area(
                         T("key_events", lg),
-                        value=coerce_display_text(dsel.get("key_events", "")),
                         height=100,
                         key=f"tw_ev_{idx}_{sel}",
                     )
                     st.markdown('<div class="nl-confirm-wrap">', unsafe_allow_html=True)
                     if st.button(T("confirm_section", lg), type="primary", key=f"ok_typ_{idx}"):
+                        edits = _read_typified_edit_widgets(idx, sel)
+                        ch = edits["characters"]
+                        ev = edits["key_events"]
                         if not typified_characters_meaningful(ch):
                             st.error(T("characters_confirm_err", lg))
                         elif not key_events_meaningful(ev):
                             st.error(T("key_events_confirm_err", lg))
                         else:
+                            user_edited = 1 if (
+                                edits["setting"] != snap.get("setting", "")
+                                or edits["characters"] != snap.get("characters", "")
+                                or edits["key_events"] != snap.get("key_events", "")
+                            ) else 0
                             st.session_state[f"_pending_confirm_{idx}"] = {
                                 "pool": "genre",
                                 "sel": sel,
-                                "setting": s,
-                                "characters": ch,
-                                "key_events": ev,
+                                "setting": edits["setting"],
+                                "characters": edits["characters"],
+                                "key_events": edits["key_events"],
+                                "user_edited": user_edited,
                             }
                             st.rerun()
                     st.markdown("</div>", unsafe_allow_html=True)
@@ -2088,6 +2155,8 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         st.session_state[norm_key] = live_char_target
                         st.session_state.pop(f"_fn_merge_sync_pick_{idx}", None)
                         st.session_state.pop(f"merge_preview_{idx}", None)
+                        st.session_state.pop(f"_merge_preview_base_{idx}", None)
+                        st.session_state.pop(f"_merge_user_edited_{idx}", None)
                         st.rerun()
                     if idx == 0:
                         st.session_state.fn_story_char_total = live_char_target
@@ -2117,9 +2186,13 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         plan_labels=plan_labels,
                     )
                     merge_sync_key = f"_fn_merge_sync_pick_{idx}"
+                    merge_base_key = f"_merge_preview_base_{idx}"
+                    merge_user_key = f"_merge_user_edited_{idx}"
+                    _mark_functional_merge_user_edited(idx)
+                    user_touched = _functional_merge_user_edited(idx)
                     if 0 <= plan_i < len(variants):
                         raw_outline = str(variants[plan_i].get("outline") or "").strip()
-                        if raw_outline and (
+                        if raw_outline and not user_touched and (
                             st.session_state.get(merge_sync_key) != plan_i
                             or not (st.session_state.get(f"merge_preview_{idx}") or "").strip()
                         ):
@@ -2133,13 +2206,13 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                                 seed=st.session_state.get("seed") or "",
                                 prior_character_profiles=prior_profiles,
                             )
-                            st.session_state[f"merge_preview_{idx}"] = format_functional_merged_outline(
+                            formatted = format_functional_merged_outline(
                                 mt, chosen_roles
                             )
+                            st.session_state[f"merge_preview_{idx}"] = formatted
+                            st.session_state[merge_base_key] = formatted
                             st.session_state[merge_sync_key] = plan_i
-                    default_outline = ""
-                    if 0 <= plan_i < len(variants):
-                        default_outline = str(variants[plan_i].get("outline") or "").strip()
+                            st.session_state.pop(merge_user_key, None)
 
                     st.text_area(
                         T("assembly_slots_title", lg),
@@ -2147,6 +2220,7 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         key=f"merge_preview_{idx}",
                         label_visibility="collapsed",
                     )
+                    _mark_functional_merge_user_edited(idx)
 
                     st.markdown('<div class="nl-confirm-wrap">', unsafe_allow_html=True)
                     if st.button(T("confirm_section", lg), type="primary", key=f"ok_fn_{idx}"):
@@ -2154,7 +2228,7 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                         if not mt:
                             st.error(T("merge_empty_err", lg))
                         else:
-                            char_default = _default_character_target(idx, lg)
+                            user_edited = 1 if _functional_merge_user_edited(idx) else 0
                             mt = normalize_single_unified_outline(
                                 mt,
                                 role_names=chosen_roles,
@@ -2164,8 +2238,8 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
                                 beat_index=idx,
                                 seed=st.session_state.get("seed") or "",
                                 prior_character_profiles=prior_profiles,
+                                preserve_user_edits=True,
                             )
-                            user_edited = 1 if mt != (default_outline or "").strip() else 0
                             pick_i = int(st.session_state.get(unified_plan_pick_key(idx), plan_i))
                             if pick_i < 0 or pick_i >= len(FN_WORLDVIEW_KEYS):
                                 pick_i = max(0, min(plan_i, len(FN_WORLDVIEW_KEYS) - 1))
@@ -2186,14 +2260,24 @@ def _workspace(llm_cfg: Dict[str, Any]) -> None:
 
     st.markdown("<div style='height:1.25rem'></div>", unsafe_allow_html=True)
     assembled = _assemble_all_beats_text(lg, n)
+    draft_asm_user_key = "_draft_asm_user_edited"
+    draft_asm_base_key = "_draft_asm_base"
+    existing_asm = (st.session_state.get("draft_asm") or "").strip()
+    base_asm = (st.session_state.get(draft_asm_base_key) or "").strip()
+    if base_asm and existing_asm and existing_asm != base_asm:
+        st.session_state[draft_asm_user_key] = True
     if st.session_state.pop("force_assemble", False) and assembled:
-        st.session_state["draft_asm"] = assembled
-
+        if not st.session_state.get(draft_asm_user_key):
+            st.session_state["draft_asm"] = assembled
+            st.session_state[draft_asm_base_key] = assembled
     draft_asm = (st.session_state.get("draft_asm") or "").strip()
     if assembled.strip() and not draft_asm:
         st.session_state["draft_asm"] = assembled
+        st.session_state[draft_asm_base_key] = assembled
     elif st.session_state.get("assembly_antitrope_synced") and assembled.strip():
-        st.session_state["draft_asm"] = assembled
+        if not st.session_state.get(draft_asm_user_key):
+            st.session_state["draft_asm"] = assembled
+            st.session_state[draft_asm_base_key] = assembled
     with st.expander(T("section_assembly", lg), expanded=False):
         st.text_area(T("section_assembly", lg), height=360, key="draft_asm")
 
