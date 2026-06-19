@@ -1244,6 +1244,6 @@ def test_prose_length_budget_scales_by_section():
     lo, hi = _prose_length_budget(4)
     assert lo == 4 * PROSE_CHARS_PER_SECTION_MIN
     assert hi == 4 * PROSE_CHARS_PER_SECTION_MAX
-    assert PROSE_CHARS_PER_SECTION_MIN >= 1200
+    assert PROSE_CHARS_PER_SECTION_MIN >= 1000
     assert PROSE_CHARS_PER_SECTION_MAX > PROSE_CHARS_PER_SECTION_MIN
 

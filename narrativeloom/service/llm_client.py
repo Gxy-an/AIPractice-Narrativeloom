@@ -51,8 +51,8 @@ TYPIFIED_KEY_EVENTS_TOTAL_MAX = 300
 TYPIFIED_KEY_EVENT_CHARS_MIN_EN = 40
 TYPIFIED_KEY_EVENT_CHARS_MAX_EN = 160
 TYPIFIED_KEY_EVENTS_TOTAL_MAX_EN = 640
-PROSE_CHARS_PER_SECTION_MIN = 1200
-PROSE_CHARS_PER_SECTION_MAX = 1500
+PROSE_CHARS_PER_SECTION_MIN = 1000
+PROSE_CHARS_PER_SECTION_MAX = 1200
 
 _PROSE_SECTION_STYLE_ZH = (
     "禁止平铺直叙与流水账；每小节须含至少两处带引号的对话、若干动作描写与环境氛围"
@@ -60,12 +60,13 @@ _PROSE_SECTION_STYLE_ZH = (
     "用展示代替告知（show, don't tell），避免「然后…接着…」式罗列。"
 )
 _PROSE_SECTION_STYLE_TYPIFIED_ZH = (
-    "【类型化·均衡叙事】情节与冲突仍是主线，读者能跟得上因果；但写法须有画面感与文学气，"
+    "【类型化·均衡叙事】情节与冲突仍是主线，读者能跟得上因果；写法须有画面感与适度文学气，"
     "禁止「谁做了什么」式流水陈述、说明文腔与「然后/接着/于是」式事件罗列。"
-    "以场景切入：动作、对话、感官细节（光、声、气味、触感）与适量心理穿插并用，展示代替告知（show, don't tell）。"
-    "句式长短错落，对话带人物口吻与潜台词；可适度比喻、通感或留白，点到即止，"
+    "以场景切入：动作、对话、感官细节（光、声、气味、触感）与短段心理/内心独白交织，展示代替告知（show, don't tell）。"
+    "句式长短错落——可穿插诗性长句与警策短句；对话带人物口吻与潜台词；"
+    "可适度运用比喻、通感、象征与留白，意象具体可感，点到即止，"
     "勿大段静态铺陈、象征性抒情或「仿佛/宛如/恰似」连篇。"
-    "每小节落实汇编事件链，禁止跳过转折；至少两处引号对话；环境描写服务情绪、紧贴情节，不写与事件无关的空景。"
+    "每小节落实汇编事件链，禁止跳过转折；至少两处引号对话；环境描写服务情绪与主题、紧贴情节。"
 )
 _PROSE_SECTION_STYLE_EN = (
     "Avoid flat summary narration; each section needs at least two quoted dialogue beats, "
@@ -73,12 +74,12 @@ _PROSE_SECTION_STYLE_EN = (
     "vary sentence rhythm; show don't tell—no 'and then… and then…' event lists."
 )
 _PROSE_SECTION_STYLE_TYPIFIED_EN = (
-    "BALANCED TYPIFIED NARRATION: plot and conflict stay clear, but prose must feel vivid and literary—"
+    "BALANCED TYPIFIED NARRATION: plot and conflict stay clear, but prose should read with vivid, slightly literary texture—"
     "no flat reportage, no 'and then… and then…' event lists or expository telling. "
-    "Open scenes with action, dialogue, selective sensory detail, and brief interior beats; show, don't tell. "
-    "Vary sentence rhythm; dialogue carries voice and subtext. Metaphor and atmosphere are welcome in moderation—"
-    "no extended lyric padding, mood-only paragraphs, or chains of similes. "
-    "Honor every outline beat; at least two quoted lines per section; setting serves emotion and stays tied to the scene."
+    "Open scenes with action, dialogue, selective sensory detail, and brief interior monologue; show, don't tell. "
+    "Vary rhythm with lyrical long lines against sharp short beats; dialogue carries voice and subtext. "
+    "Use metaphor, synesthesia, symbol, and white space in moderation—concrete imagery, no extended lyric padding or simile chains. "
+    "Honor every outline beat; at least two quoted lines per section; setting serves emotion and theme while staying tied to the scene."
 )
 
 
@@ -2489,7 +2490,7 @@ def expand_prose(
     """
     将小节汇编扩写为连贯长叙事。
     返回 (title, prose)：title 为模型建议的整篇标题（可能为空）；prose 为正文。
-    总篇幅与小节数正相关：每节约 1200～1500 字（中英文同），须含对话、环境、动作等细节。
+    总篇幅与小节数正相关：每节约 1000～1200 字（中英文同），须含对话、环境、动作等细节。
     """
     cfg = _cfg_or_env(llm_cfg)
     bc = (beats_combined or "").strip()
@@ -2497,17 +2498,17 @@ def expand_prose(
     prose_min, prose_max = _prose_length_budget(n_sec)
     max_tokens = _expand_prose_max_tokens(prose_max)
     typified = (persona_pool or "function") == "genre"
-    temp = 0.79 if typified else 0.82
+    temp = 0.81 if typified else 0.82
     if lang == "en":
         style_block = _PROSE_SECTION_STYLE_TYPIFIED_EN if typified else _PROSE_SECTION_STYLE_EN
         if typified:
             system = (
-                "You are a skilled fiction writer. Expand the beat compilation into prose that balances "
-                "clear plot progression with vivid, literary scene work—not flat summary narration. "
+                "You are a skilled literary fiction writer. Expand the beat compilation into prose that balances "
+                "clear plot progression with vivid, slightly literary scene work—not flat summary narration. "
                 "Follow the outline's event chain beat by beat; do not skip or soften turning points. "
                 "Every paragraph should advance action, dialogue, or choice through concrete scenes: "
-                "sensory detail, character voice, and brief interior beats—not bare statements of fact. "
-                "Avoid reportage, expository telling, and empty lyric padding alike. "
+                "sensory detail, character voice, brief interior monologue, and controlled metaphor—not bare statements. "
+                "Let lyrical long lines alternate with sharp short beats; avoid reportage and empty lyric padding alike. "
                 f"Aim for roughly {prose_min}–{prose_max} words total ({n_sec} sections × "
                 f"{PROSE_CHARS_PER_SECTION_MIN}–{PROSE_CHARS_PER_SECTION_MAX} words each). "
                 f"Each section must reach at least {PROSE_CHARS_PER_SECTION_MIN} words; "
@@ -2551,7 +2552,7 @@ def expand_prose(
         user += f"Beat compilation ({n_sec} sections):\n{bc}\n\n"
         if typified:
             user += (
-                "Typified mode: keep plot beats clear while writing with scene, voice, and atmosphere—"
+                "Typified mode: keep plot beats clear while writing with scene, voice, atmosphere, and light literary texture—"
                 "avoid both flat reportage and ornate lyric padding.\n"
             )
         user += (
@@ -2562,10 +2563,11 @@ def expand_prose(
         style_block = _PROSE_SECTION_STYLE_TYPIFIED_ZH if typified else _PROSE_SECTION_STYLE_ZH
         if typified:
             system = (
-                "你是中文小说作者，擅长把纲要扩写为**情节清楚、写法有文学感**的长叙事："
+                "你是中文小说作者，擅长把纲要扩写为**情节清楚、文学性适中**的长叙事："
                 "因果链让读者跟得上，但禁止平铺直叙、说明文腔与「谁做了什么」式流水账。"
-                "以场景切入，动作、对话、感官细节与适量心理交织，展示代替告知；"
-                "对话带人物口吻与潜台词，句式长短错落，可适度比喻/留白，点到即止。"
+                "以场景切入，动作、对话、感官细节与短段心理/内心独白交织，展示代替告知；"
+                "句式长短错落，可穿插诗性长句与警策短句；对话带人物口吻与潜台词；"
+                "可适度运用比喻、通感、象征与留白，意象具体可感，文学性略高于平实报道、低于纯抒情堆砌。"
                 "以汇编中的核心事件链为主线，按小节顺序逐条落实，禁止跳过或弱化已定转折。"
                 f"总篇幅目标约 {prose_min}～{prose_max} 字（共 {n_sec} 个小节，每节约 "
                 f"{PROSE_CHARS_PER_SECTION_MIN}～{PROSE_CHARS_PER_SECTION_MAX} 字）；"
@@ -2611,7 +2613,7 @@ def expand_prose(
             user += f"【前文摘录】\n{rag_excerpt}\n\n"
         user += f"小节汇编（共 {n_sec} 节）：\n{bc}\n\n"
         if typified:
-            user += "【类型化扩写】情节优先，兼顾场景质感、人物口吻与适度文学表达；避免流水账，亦避免辞藻堆砌。\n"
+            user += "【类型化扩写】情节优先，文学性略强：兼顾场景质感、人物口吻与适度意象表达；避免流水账，亦避免辞藻堆砌。\n"
         user += "请输出上述 JSON。"
     raw = (complete_chat(cfg, system, user, temperature=temp, max_tokens=max_tokens, retry_attempts=8, retry_pause=3.0) or "").strip()
     title, prose = _finalize_expanded_prose(raw)
